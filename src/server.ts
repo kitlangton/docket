@@ -1,7 +1,8 @@
-import { mkdir } from "node:fs/promises"
+import { mkdir, rename } from "node:fs/promises"
 import { basename, join } from "node:path"
 import index from "../web/index.html"
 import { baseFor, fileAt, interdiff, loadAll, manifestItems, readCache } from "./load"
+import { writeAtomic } from "./files"
 import { dataHome } from "./session"
 import { readState, toVerdicts } from "./state"
 import {
@@ -23,6 +24,7 @@ const REFRESH_MS = Number(process.env.DOCKET_REFRESH_MS ?? 60_000)
 const IDLE_MS = Number(process.env.DOCKET_IDLE_MS ?? 30 * 60_000)
 
 type ServerOptions = { port: number; version: string }
+type ShutdownMode = "stop" | "restart"
 
 type Entry = {
   session: Session
@@ -51,30 +53,21 @@ export async function serve(options: ServerOptions) {
   const runtimes = new Map<string, Runtime>()
   const waiters = new Map<string, Set<Stream>>()
   const tabs = new Map<string, Stream & { at: string }>()
-  const writes = new Set<Promise<unknown>>()
   const idle = { since: Date.now() }
   const publicUrl = (await portlessAlias(options.port)) ?? `http://docket.localhost:${options.port}`
 
-  const track = <T>(promise: Promise<T>) => {
-    writes.add(promise)
-    promise.finally(() => writes.delete(promise))
-    return promise
-  }
-  const write = (path: string, data: string) => track(Bun.write(path, data))
-  const saveIndex = () => write(indexPath, JSON.stringify(entries, null, 2))
+  const saveIndex = () => writeAtomic(indexPath, JSON.stringify(entries, null, 2))
 
   const broadcast = (event: ServerEvent) => tabs.forEach((tab) => tab.send(event))
   const busy = () => tabs.size > 0 || waiters.size > 0
 
-  const runtime = (id: string, refresh = false) => {
-    const existing = runtimes.get(id)
-    const entry = entries[id]
-    if (existing && !refresh) return existing
-    if (!entry) return undefined
-    const fresh = startRuntime(entry.session.manifest, refresh, (version) => broadcast({ type: "session", id, version }))
+  const start = (id: string, ignoreCache: boolean) => {
+    const fresh = startRuntime(entries[id]!.session.manifest, ignoreCache, (version) => broadcast({ type: "session", id, version }))
     runtimes.set(id, fresh)
     return fresh
   }
+  // Sessions from an earlier server load lazily, on first use.
+  const runtime = (id: string) => runtimes.get(id) ?? (entries[id] ? start(id, false) : undefined)
 
   const notifyWaiters = (id: string, event: WaitEvent) => {
     waiters.get(id)?.forEach((waiter) => {
@@ -84,23 +77,38 @@ export async function serve(options: ServerOptions) {
     waiters.delete(id)
   }
 
+  // One unreadable state file hides its row instead of failing the whole inbox.
   const inbox = async () => {
     const rows = await Promise.all(
       Object.entries(entries)
         .filter(([, entry]) => !entry.archived)
-        .map(([id, entry]) => inboxEntry(id, entry, waiters.get(id)?.size ?? 0)),
+        .map(([id, entry]) =>
+          inboxEntry(id, entry, waiters.get(id)?.size ?? 0).catch((error: unknown) => {
+            console.error(`docket: skipping session ${id} in the inbox: ${error}`)
+            return undefined
+          }),
+        ),
     )
-    return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    return rows.filter((row) => row !== undefined).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }
 
-  const shutdown = async () => {
+  /**
+   * Stops the server. A restart (new code) leaves waiting clients to reconnect to the next server; a stop
+   * tells them the session closed, so they exit instead of starting another server.
+   */
+  const stopping = { started: false }
+  const shutdown = async (mode: ShutdownMode) => {
+    if (stopping.started) return
+    stopping.started = true
     broadcast({ type: "restart" })
-    // Give tabs a moment to flush pending state, then finish every write in flight.
+    // Give tabs a moment to save pending state; stop() then waits for those requests to finish.
     await Bun.sleep(300)
-    await Promise.all([...writes])
+    waiters.forEach((_, id) => {
+      if (mode === "stop") return notifyWaiters(id, { type: "closed", statePath: entries[id]!.session.statePath })
+      waiters.get(id)?.forEach((waiter) => waiter.close())
+    })
     tabs.forEach((tab) => tab.close())
-    waiters.forEach((set) => set.forEach((waiter) => waiter.close()))
-    server.stop(true)
+    await Promise.race([server.stop(), Bun.sleep(5000)])
     process.exit(0)
   }
 
@@ -124,8 +132,9 @@ export async function serve(options: ServerOptions) {
         GET: () => Response.json({ app: APP_ID, version: options.version, pid: process.pid, port: options.port, url: publicUrl }),
       },
       "/api/shutdown": {
-        POST: () => {
-          setTimeout(shutdown, 50)
+        POST: async (req) => {
+          const body: { mode?: ShutdownMode } = await req.json().catch(() => ({}))
+          setTimeout(() => shutdown(body.mode === "restart" ? "restart" : "stop"), 50)
           return Response.json({ ok: true })
         },
       },
@@ -134,6 +143,8 @@ export async function serve(options: ServerOptions) {
         POST: async (req) => {
           const registration: Registration = await req.json()
           const id = registration.session.id
+          // A changed manifest (edited file, different flags) needs a fresh load, not the old runtime's items.
+          const changed = JSON.stringify(entries[id]?.session.manifest) !== JSON.stringify(registration.session.manifest)
           entries[id] = {
             session: registration.session,
             cwd: registration.cwd,
@@ -141,7 +152,7 @@ export async function serve(options: ServerOptions) {
             registeredAt: new Date().toISOString(),
           }
           await saveIndex()
-          runtime(id, registration.refresh)
+          if (changed || registration.refresh || !runtimes.has(id)) start(id, Boolean(registration.refresh))
           broadcast({ type: "inbox" })
           // Reuse a tab already showing this session or the inbox instead of opening another.
           const tab =
@@ -196,7 +207,7 @@ export async function serve(options: ServerOptions) {
         PUT: async (req) => {
           const found = session(req)
           if (!found) return notFound()
-          await write(found.entry.session.statePath, JSON.stringify(await req.json(), null, 2))
+          await writeAtomic(found.entry.session.statePath, JSON.stringify(await req.json(), null, 2))
           broadcast({ type: "inbox" })
           return Response.json({ ok: true })
         },
@@ -261,8 +272,8 @@ export async function serve(options: ServerOptions) {
           const { session: s } = found.entry
           const verdicts = toVerdicts(s.manifestPath, s.manifest, runtime(found.id)?.items ?? {}, state)
           await Promise.all([
-            write(s.statePath, JSON.stringify(state, null, 2)),
-            write(s.outPath, JSON.stringify(verdicts, null, 2) + "\n"),
+            writeAtomic(s.statePath, JSON.stringify(state, null, 2)),
+            writeAtomic(s.outPath, JSON.stringify(verdicts, null, 2) + "\n"),
           ])
           found.entry.handedBackAt = new Date().toISOString()
           await saveIndex()
@@ -275,7 +286,7 @@ export async function serve(options: ServerOptions) {
         POST: async (req) => {
           const found = session(req)
           if (!found) return notFound()
-          await write(found.entry.session.statePath, JSON.stringify(await req.json(), null, 2))
+          await writeAtomic(found.entry.session.statePath, JSON.stringify(await req.json(), null, 2))
           notifyWaiters(found.id, { type: "closed", statePath: found.entry.session.statePath })
           broadcast({ type: "inbox" })
           return Response.json({ ok: true })
@@ -301,7 +312,7 @@ export async function serve(options: ServerOptions) {
       if (busy()) idle.since = Date.now()
       if (Date.now() - idle.since <= IDLE_MS) return
       console.log(`docket: idle for ${Math.round(IDLE_MS / 1000)}s, shutting down`)
-      shutdown()
+      shutdown("stop")
     },
     Math.min(30_000, Math.max(250, IDLE_MS / 4)),
   )
@@ -310,8 +321,8 @@ export async function serve(options: ServerOptions) {
     const open = new Set([...tabs.values()].flatMap((tab) => tab.at.match(/^\/s\/([^/]+)/)?.slice(1) ?? []).map(decodeURIComponent))
     open.forEach((id) => runtimes.get(id)?.refresh())
   }, REFRESH_MS)
-  process.on("SIGTERM", shutdown)
-  process.on("SIGINT", shutdown)
+  process.on("SIGTERM", () => shutdown("stop"))
+  process.on("SIGINT", () => shutdown("stop"))
   return { server, url: publicUrl }
 }
 
@@ -379,10 +390,16 @@ async function inboxEntry(id: string, entry: Entry, waiting: number): Promise<In
   }
 }
 
+/** The registered sessions. An unreadable index is moved aside, so the server still starts. */
 async function readIndex(path: string): Promise<Record<string, Entry>> {
   const file = Bun.file(path)
   if (!(await file.exists())) return {}
-  return file.json()
+  return file.json().catch(async (error: unknown) => {
+    const aside = `${path}.unreadable-${Date.now()}`
+    console.error(`docket: ${path} is unreadable (${error}); moved it to ${aside}`)
+    await rename(path, aside)
+    return {}
+  })
 }
 
 /** If portless is installed, serve docket at https://docket.localhost through it. */

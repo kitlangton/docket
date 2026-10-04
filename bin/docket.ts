@@ -81,7 +81,10 @@ async function review() {
   await waitForHandback(session, registration)
 }
 
-/** Blocks until the session is handed back or closed, reconnecting (and restarting the server) if it goes away. */
+/**
+ * Blocks until the session is handed back or closed. If the server goes away (a restart onto new code), it
+ * reconnects, starting a server if none comes back; it registers again only if that server doesn't know the session.
+ */
 async function waitForHandback(session: Session, registration: Registration) {
   for (;;) {
     const event = await waitOnce(port, session.id)
@@ -95,8 +98,8 @@ async function waitForHandback(session: Session, registration: Registration) {
       process.exit(0)
     }
     await Bun.sleep(500)
-    const running = await ensureServer(port).catch(() => undefined)
-    if (running) await register(port, { ...registration, refresh: false }).catch(() => undefined)
+    if (event?.type === "missing") await register(port, { ...registration, refresh: false }).catch(() => undefined)
+    else await ensureServer(port).catch(() => undefined)
   }
 }
 
@@ -127,11 +130,11 @@ async function serverCommand(action: string | undefined) {
     return
   }
   if (action === "stop") {
-    console.log((await stopServer(port).catch(fail)) ? "docket server: stopped" : `docket server: not running on port ${port}`)
+    console.log((await stopServer(port, "stop").catch(fail)) ? "docket server: stopped" : `docket server: not running on port ${port}`)
     return
   }
   if (action === "restart") {
-    await stopServer(port).catch(fail)
+    await stopServer(port, "restart").catch(fail)
     const running = await ensureServer(port, { version: await buildVersion() }).catch(fail)
     console.log(`docket server ${running.url} (pid ${running.pid})`)
     return

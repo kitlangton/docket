@@ -34,7 +34,7 @@ export async function health(port: number): Promise<Health | undefined> {
 export async function ensureServer(port: number, options: { version?: string } = {}) {
   const running = await health(port)
   if (running && (!options.version || running.version === options.version)) return running
-  if (running) await stopServer(port)
+  if (running) await stopServer(port, "restart")
   await spawnServer(port)
   const started = await waitFor(port, (found) => found !== undefined, 20_000, "the docket server did not start; see " + logPath())
   // Open tabs reload onto the new build; give them a moment to reconnect so they can be reused.
@@ -42,10 +42,11 @@ export async function ensureServer(port: number, options: { version?: string } =
   return started
 }
 
-export async function stopServer(port: number) {
+/** Stops the server. "stop" also ends waiting clients; "restart" leaves them to reconnect to the next server. */
+export async function stopServer(port: number, mode: "stop" | "restart") {
   const running = await health(port)
   if (!running) return false
-  await fetch(`${serverBase(port)}/api/shutdown`, { method: "POST" }).catch(() => undefined)
+  await fetch(`${serverBase(port)}/api/shutdown`, { method: "POST", body: JSON.stringify({ mode }) }).catch(() => undefined)
   await waitFor(port, (found) => found === undefined, 15_000, "the docket server did not stop")
   return true
 }
@@ -76,9 +77,13 @@ export async function register(port: number, registration: Registration) {
   return body
 }
 
-/** Waits on the session's event stream. Resolves with the final event, or `undefined` if the stream dropped. */
-export async function waitOnce(port: number, id: string): Promise<WaitEvent | undefined> {
+/**
+ * Waits on the session's event stream. Resolves with the final event, "missing" if the server doesn't know the
+ * session, or `undefined` if the server couldn't be reached or the stream dropped.
+ */
+export async function waitOnce(port: number, id: string): Promise<WaitEvent | { type: "missing" } | undefined> {
   const res = await fetch(`${serverBase(port)}/api/s/${encodeURIComponent(id)}/wait`).catch(() => undefined)
+  if (res?.status === 404) return { type: "missing" }
   if (!res?.ok || !res.body) return undefined
   const decoder = new TextDecoder()
   const buffer = { text: "" }
