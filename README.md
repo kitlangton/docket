@@ -14,6 +14,8 @@ docket 52985 52988                        # PR numbers, in this order
 docket --author @me --state open          # anything gh pr list can filter
 docket my-branch                          # local branch against the base it most likely forked from
 docket v2..my-branch                      # explicit range (merge-base diff)
+docket open                               # just open the inbox
+docket server status|stop|restart         # manage the background server
 ```
 
 The repository is the current directory's checkout unless `--repo <path>` is given (a manifest uses its `repo.path`); the GitHub repo comes from the `origin` remote.
@@ -22,13 +24,21 @@ The repository is the current directory's checkout unless `--repo <path>` is giv
 | --------------- | ----------------------------------------------- |
 | `--repo <path>` | Git checkout to use                             |
 | `--out <path>`  | Where to write `verdicts.json`                  |
-| `--port <n>`    | Port to listen on (default: any free port)      |
+| `--port <n>`    | Server port (default: `$DOCKET_PORT` or 4789)    |
 | `--no-open`     | Print the URL without opening a browser         |
 | `--refresh`     | Ignore the PR cache                             |
 
 Install with `bun install && bun link`. Requirements: Bun, an authenticated `gh`, and a local clone.
 
-docket prints its URL immediately. It exits 0 when you hand back (`w` on the summary screen), printing one line per item and the verdicts path, or on Ctrl-C, printing `closed without hand-back` and the state path.
+docket prints its URL immediately. It exits 0 when you hand back (`w` or `:w`), printing one line per item and the verdicts path, or on Ctrl-C, printing `closed without hand-back` and the state path.
+
+## One server, one inbox
+
+Every session lives in a single background server at **http://docket.localhost:4789** (bound to 127.0.0.1; Chromium resolves `*.localhost` itself). `docket <args>` is a client: it starts the server if none answers on the port, registers the session, opens `/s/<session>` (or points an already open docket tab at it instead), and then waits on the session's event stream until you hand it back. Ctrl-C only stops the client; the session stays in the server, so you can still finish it.
+
+The home page, `/`, is an inbox of every session: **Waiting on you** (a client is waiting for the hand-back), **In progress**, and **Done**. Move with `j`/`k`, open with `Enter`, archive with `d`, and get back to it from a session with `g h` or the **Inbox** link above the rail. Registering the same session again (same manifest, or the same PR numbers or ref from the same checkout) attaches to it; every client waiting on a session receives its hand-back.
+
+The server identifies itself at `/api/health` with its version (package version plus a hash of the source). A client running different code restarts the server: it lets open tabs save, finishes in-flight writes, and starts the new build; tabs reload onto it and waiting clients reconnect. The server stops after 30 minutes with no open tabs and no waiting clients (`--idle-ms` or `DOCKET_IDLE_MS` to change that); its log is `~/.local/share/docket/.server/server.log`. If [`portless`](https://github.com/vercel-labs/portless) is on your `PATH`, the server also registers `https://docket.localhost` and uses that URL.
 
 For each PR, docket runs `gh pr view`, fetches `pull/N/head` and the base branches in one `git fetch`, and diffs the head against its merge base. If git fails it falls back to `gh pr diff`. PR data is cached under `~/.cache/docket`, so reopening is instant; a background refresh picks up new pushes.
 
@@ -95,6 +105,12 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `?` | Toggle this help |
 | `Escape` | Cancel pending key or selection |
 | `w` | Hand back _(summary)_ |
+| **Inbox** | |
+| `gh` | Go to the inbox |
+| `j` / `ArrowDown` | Next session _(home)_ |
+| `k` / `ArrowUp` | Previous session _(home)_ |
+| `Enter` / `o` | Open session _(home)_ |
+| `d` | Archive a session that isn't waiting _(home)_ |
 <!-- keys:end -->
 
 Sequences like `gg`, `]c`, and `zz` are typed one key after another; a bare `]` or `[` runs after a short pause (about 400 ms) if no `c` follows. Bindings marked "(count)" take a count prefix such as `3j`, `2]`, or `5J`; `10G` goes to line 10 of the current file. The status bar shows a pending count or key while you type.

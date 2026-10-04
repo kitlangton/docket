@@ -107,6 +107,7 @@ export function Rail(props: {
   current: string
   stamped: string | null
   onSelect: (id: string) => void
+  onHome: () => void
 }) {
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -118,6 +119,12 @@ export function Rail(props: {
   return (
     <nav className="rail" ref={ref}>
       <div className="rail-head">
+        <button className="rail-home" onMouseDown={(event) => event.preventDefault()} onClick={props.onHome} title="Inbox (g h)">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <path d="M7.5 2.5L4 6l3.5 3.5" />
+          </svg>
+          Inbox
+        </button>
         <div className="rail-title" title={props.manifest.summary ?? props.manifest.title}>
           {props.manifest.title}
         </div>
@@ -416,7 +423,9 @@ export function Help(props: { onClose: () => void }) {
                   </dt>
                   <dd>
                     {binding.label}
-                    {binding.modes?.length === 1 && binding.modes[0] !== "normal" ? <span className="help-mode">{binding.modes[0]}</span> : null}
+                    {binding.modes?.length === 1 && binding.modes[0] !== "normal" ? (
+                      <span className="help-mode">{binding.modes[0]}</span>
+                    ) : null}
                   </dd>
                 </div>
               ))}
@@ -634,7 +643,7 @@ function Stat(props: { value: number; label: string; kind: string }) {
   )
 }
 
-export function HandedBack(props: { path: string; state: ReviewState; order: string[] }) {
+export function HandedBack(props: { path: string; state: ReviewState; order: string[]; onHome: () => void }) {
   const counts = countVerdicts(props.order, props.state)
   return (
     <div className="splash view-enter">
@@ -649,7 +658,9 @@ export function HandedBack(props: { path: string; state: ReviewState; order: str
           {counts.unreviewed ? ` · ${counts.unreviewed} unreviewed` : ""}
         </p>
         <p className="handed-back-path">{props.path}</p>
-        <p className="muted">You can close this tab.</p>
+        <button className="link-button" onMouseDown={(event) => event.preventDefault()} onClick={props.onHome}>
+          Back to inbox <Keys>g h</Keys>
+        </button>
       </div>
     </div>
   )
