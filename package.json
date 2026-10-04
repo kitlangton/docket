@@ -1,12 +1,39 @@
 {
-  "name": "docket",
+  "name": "@kitlangton/docket",
   "version": "0.1.0",
-  "description": "Keyboard-first local review docket for a batch of pull requests",
+  "description": "A keyboard-first local review queue for batches of pull requests, with verdicts an agent can act on",
+  "keywords": [
+    "code-review",
+    "pull-requests",
+    "git",
+    "github",
+    "diff",
+    "cli",
+    "vim",
+    "agents",
+    "bun"
+  ],
+  "homepage": "https://github.com/kitlangton/docket#readme",
+  "bugs": "https://github.com/kitlangton/docket/issues",
+  "repository": "github:kitlangton/docket",
   "license": "MIT",
+  "author": "Kit Langton",
   "type": "module",
   "bin": {
     "docket": "./bin/docket.ts"
   },
+  "files": [
+    "bin",
+    "src",
+    "web",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "start": "bun bin/docket.ts",
     "typecheck": "tsc --noEmit && bun scripts/keys.ts --check",
@@ -16,7 +43,6 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.5.1",
-    "geist": "^1.7.2",
     "marked": "^18.0.14",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
@@ -31,6 +57,5 @@
   "prettier": {
     "semi": false,
     "printWidth": 140
-  },
-  "packageManager": "bun@1.4.2"
+  }
 }
