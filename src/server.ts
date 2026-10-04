@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises"
 import { basename, join } from "node:path"
 import index from "../web/index.html"
-import { loadAll, manifestItems, readCache } from "./load"
+import { baseFor, fileAt, loadAll, manifestItems, readCache } from "./load"
 import { dataHome, type Session } from "./session"
 import {
   sizeOf,
@@ -232,6 +232,22 @@ export async function serve(options: ServerOptions) {
               touchIdle()
               broadcast({ type: "inbox" })
             }
+          })
+        },
+      },
+      "/api/s/:id/file": {
+        GET: async (req) => {
+          const found = session(req)
+          if (!found) return notFound()
+          const params = new URL(req.url).searchParams
+          const load = runtime(found.id)?.items[params.get("item") ?? ""]
+          if (!load?.ok) return notFound()
+          const manifest = found.entry.session.manifest
+          const oid = params.get("side") === "old" ? await baseFor(manifest, load.data.meta) : load.data.meta.headRefOid
+          const contents = oid ? await fileAt(manifest, oid, params.get("path") ?? "") : undefined
+          if (contents === undefined) return new Response("Not found", { status: 404 })
+          return new Response(contents, {
+            headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "max-age=31536000, immutable" },
           })
         },
       },

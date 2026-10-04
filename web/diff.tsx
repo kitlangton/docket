@@ -2,6 +2,7 @@ import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from "@p
 import { FileDiff, type FileDiffOptions } from "@pierre/diffs/react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note, Side } from "../src/types"
+import { attach, detach, onSeparatorClick } from "./expand"
 import { SEPARATOR_CSS, stampSeparators } from "./separators"
 
 export type Draft = { path: string; side: Side; startLine?: number; line: number; body: string; noteId?: string }
@@ -21,6 +22,9 @@ export type FileBlockProps = {
   /** Visual mode: show the selection as a range instead of the cursor. */
   visual: boolean
   diffStyle: "split" | "unified"
+  /** Where this file's context expansions are recorded. */
+  expandKey: string
+  loadFiles: NonNullable<FileDiffOptions<AnnotationMeta, undefined>["loadDiffFiles"]>
   onLine: (file: number, side: Side, line: number) => void
   /** A range picked with the mouse; `compose` is true when it came from the gutter + button. */
   onRange: (file: number, range: SelectedLineRange, compose: boolean) => void
@@ -84,8 +88,17 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       lineDiffType: "word-alt",
       overflow: "scroll",
       unsafeCSS: BASE_CSS + SEPARATOR_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
-      onPostRender: (node, _instance, phase) => {
-        if (phase !== "unmount") stampSeparators(node, props.file)
+      loadDiffFiles: props.loadFiles,
+      onPostRender: (node, instance, phase) => {
+        if (phase === "unmount") return detach(props.expandKey, instance)
+        stampSeparators(node, props.file)
+        if (phase !== "mount") return
+        node.shadowRoot?.addEventListener(
+          "click",
+          onSeparatorClick(props.expandKey, () => props.file.hunks.length),
+          true,
+        )
+        attach(props.expandKey, instance)
       },
       enableGutterUtility: true,
       enableLineSelection: true,
@@ -95,7 +108,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       },
       onLineClick: (event) => onLine(index, event.annotationSide, event.lineNumber),
     }),
-    [props.diffStyle, props.visual, props.file, onLine, onRange, index],
+    [props.diffStyle, props.visual, props.file, props.expandKey, props.loadFiles, onLine, onRange, index],
   )
 
   const annotations = useMemo(() => {

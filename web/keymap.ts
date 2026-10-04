@@ -50,6 +50,8 @@ export type Action =
   | "foldClose"
   | "foldOpenAll"
   | "foldCloseAll"
+  | "expandContext"
+  | "expandContextAll"
   | "palette"
   | "splitToggle"
   | "whitespaceToggle"
@@ -129,6 +131,8 @@ export const KEYMAP: Binding[] = [
   { keys: ["z c"], action: "foldClose", label: "Close fold", group: "Folds" },
   { keys: ["z R"], action: "foldOpenAll", label: "Open all folds", group: "Folds" },
   { keys: ["z M"], action: "foldCloseAll", label: "Fold all files", group: "Folds" },
+  { keys: ["e"], action: "expandContext", label: "Expand 20 lines of context around the change", group: "Folds" },
+  { keys: ["E"], action: "expandContextAll", label: "Expand all context around the change", group: "Folds" },
 
   { keys: [":"], action: "commandLine", label: "Command line (:w :q :wq :s :<PR number>)", group: "Commands", modes: ["normal", "summary"] },
   { keys: ["Enter"], action: "summary", label: "Summary (unfolds a folded file first)", group: "Commands" },

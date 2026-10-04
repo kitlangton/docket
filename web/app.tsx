@@ -13,6 +13,7 @@ import {
 import { Home } from "./home"
 import { FileBlock, type Draft } from "./diff"
 import { rowElement } from "./dom"
+import { expandAround, fileKey, loader } from "./expand"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
 import { feed, keyName, type Action, type Binding, type Mode, type Pending } from "./keymap"
 import {
@@ -647,6 +648,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     setFolds((prev) => ({ ...prev, ...Object.fromEntries(model.files.map((file) => [`${current}:${file.name}`, folded])) }))
   }
 
+  const expandCursor = (all: boolean) => {
+    if (!cursor || !model) return say("Move to a change first")
+    const file = model.files[cursor.file]!
+    if (isCollapsed(cursor.file)) setFold(cursor.file, false)
+    expandAround(fileKey(session.id, current, file.name, ignoreWhitespace), cursor.hunk, all)
+  }
+
   const fileStep = (direction: 1 | -1, count: number) => {
     const rows = model?.rows ?? []
     const file = cursor?.file ?? HEADER
@@ -787,6 +795,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       if (cursor) setFold(cursor.file, true)
     },
     foldOpenAll: () => setAllFolds(false),
+    expandContext: () => expandCursor(false),
+    expandContextAll: () => expandCursor(true),
     foldCloseAll: () => setAllFolds(true),
     palette: () => setPalette(true),
     splitToggle: () => {
@@ -904,6 +914,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   }
 
   const load = session.items[current]
+  const loadFiles = useMemo(() => loader(props.base, current), [props.base, current])
   const visualAnchor = visual && model ? rangeAnchor(model.rows, visual.anchor, cursorIndex) : undefined
   const visualCount = visualAnchor ? visualAnchor.line - (visualAnchor.startLine ?? visualAnchor.line) + 1 : 0
   const statusPosition = visual
@@ -991,6 +1002,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
                   selection={selectionFor(index)}
                   visual={Boolean(visual) && cursor?.file === index}
                   diffStyle={diffStyle}
+                  expandKey={fileKey(session.id, current, file.name, ignoreWhitespace)}
+                  loadFiles={loadFiles}
                   onLine={clickLine}
                   onRange={pickRange}
                   onSaveDraft={saveDraft}

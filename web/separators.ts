@@ -1,20 +1,23 @@
 import type { FileDiffMetadata } from "@pierre/diffs"
 
-/** Stamps each unmodified-lines row with its count and the header of the hunk it precedes. */
+/** Stamps each unmodified-lines row with its count and the header of the hunk below it. */
 export function stampSeparators(node: HTMLElement, file: FileDiffMetadata) {
-  const hunks = file.hunks.filter((hunk) => hunk.collapsedBefore > 0)
+  const gapped = file.hunks.filter((hunk) => hunk.collapsedBefore > 0)
   node.shadowRoot?.querySelectorAll<HTMLElement>("[data-gutter], [data-content]").forEach((column) =>
     [...column.querySelectorAll<HTMLElement>(":scope > [data-separator]")].forEach((element, index) => {
-      const count = element.textContent?.match(/\d+/)?.[0] ?? element.dataset.count
-      if (!count) return
-      const hunk = hunks[index]
-      element.dataset.count = count
-      element.title = `${count} unmodified lines`
-      if (!hunk) return
-      const specs = `@@ -${hunk.deletionStart},${hunk.deletionCount} +${hunk.additionStart},${hunk.additionCount} @@`
-      element.dataset.hunk = hunk.hunkContext ? `${specs} ${hunk.hunkContext.trim()}` : specs
+      const count = element.textContent?.match(/\d+/)?.[0]
+      // Expandable rows name their gap; others are in hunk order.
+      const gap = element.dataset.expandIndex
+      const hunk = gap === undefined ? gapped[index] : file.hunks[Number(gap)]
+      element.title = count ? `${count} unmodified lines` : "More context"
+      element.dataset.hunk = hunk ? hunkHeader(hunk) : ""
     }),
   )
+}
+
+function hunkHeader(hunk: FileDiffMetadata["hunks"][number]) {
+  const specs = `@@ -${hunk.deletionStart},${hunk.deletionCount} +${hunk.additionStart},${hunk.additionCount} @@`
+  return hunk.hunkContext ? `${specs} ${hunk.hunkContext.trim()}` : specs
 }
 
 const ROW = "[data-separator=line-info-basic]"
@@ -32,6 +35,9 @@ const EXPAND_ICON = `url("data:image/svg+xml,${encodeURIComponent(
 export const SEPARATOR_CSS = /* css */ `
 ${ROW} { height: 24px; background-color: color-mix(in srgb, var(--accent) 7%, var(--bg)); }
 ${ROW} [data-separator-wrapper] { display: none; }
+${ROW}[data-expand-index] { cursor: pointer; }
+${ROW}[data-expand-index]:hover { background-color: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+${GUTTER}[data-expand-index]:hover::after { background-color: var(--accent); }
 ${ROW}::after { position: absolute; pointer-events: none; }
 ${GUTTER}::after {
   content: "";

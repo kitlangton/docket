@@ -49,6 +49,8 @@ export type ItemMeta = {
   body: string
   headRefName: string
   headRefOid: string
+  /** The merge base the diff was taken from. */
+  baseOid?: string
   baseRefName: string
   url?: string
   state: ItemState
