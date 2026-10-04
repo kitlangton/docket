@@ -122,51 +122,64 @@ export function PrHeader(props: {
   load: ItemLoad | undefined
   review: PrReview | undefined
   state: ReviewState
-  total: number
   viewed: { done: number; total: number } | null
+  condensed: boolean
+  badges?: ReactNode
+  children?: ReactNode
 }) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
-  const stats = meta
-    ? [
-        meta.commits ? `${meta.commits} commit${meta.commits === 1 ? "" : "s"}` : null,
-        `${meta.changedFiles} file${meta.changedFiles === 1 ? "" : "s"}`,
-      ].filter((value) => value !== null)
-    : []
+  const title = meta ? displayTitle(meta.title) : null
+  const label = itemLabel(props.entry.pr)
+  const counts = meta ? (
+    <span className="pr-counts tabular">
+      {meta.commits ? <span>{`${meta.commits} commit${meta.commits === 1 ? "" : "s"}`}</span> : null}
+      <span>{`${meta.changedFiles} file${meta.changedFiles === 1 ? "" : "s"}`}</span>
+      {meta.additions ? <span className="add">+{meta.additions}</span> : null}
+      {meta.deletions ? <span className="del">−{meta.deletions}</span> : null}
+      {meta.state !== "OPEN" ? <span>{STATE_LABEL[meta.state]}</span> : null}
+      {meta.url ? (
+        <a className="pr-link" href={meta.url} target="_blank" rel="noreferrer" title="Open on GitHub">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <path d="M4 2.5h5.5V8M9.5 2.5L3 9" />
+          </svg>
+        </a>
+      ) : null}
+    </span>
+  ) : null
   return (
-    <header className="pr-header">
-      <div className="pr-context">
-        <span>{props.entry.group.title}</span>
-        <span className="sep" />
-        <span className="tabular">
-          {props.entry.index + 1} of {props.total}
+    <>
+      <div className={`pr-sticky${props.condensed ? " is-on" : ""}`} aria-hidden={!props.condensed}>
+        <span className="pr-num">{label}</span>
+        <span className="pr-sticky-text" title={[title, props.entry.pr.why].filter(Boolean).join("\n\n")}>
+          <span className="pr-sticky-title">{title}</span>
+          {props.entry.pr.why ? <span className="pr-sticky-why">{props.entry.pr.why}</span> : null}
         </span>
-        <span className="sep" />
-        <span className="tabular">{itemLabel(props.entry.pr)}</span>
-        {meta && meta.state !== "OPEN" ? <span className="pr-state">{STATE_LABEL[meta.state]}</span> : null}
-        <span className="spacer" />
-        {props.review?.verdict ? (
-          <span className={`verdict-chip is-${props.review.verdict}`}>
-            <Glyph verdict={props.review.verdict} />
-            {VERDICT_LABEL[props.review.verdict]}
-          </span>
-        ) : null}
-        {meta?.url ? (
-          <a className="pr-link" href={meta.url} target="_blank" rel="noreferrer">
-            GitHub
-            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-              <path d="M3 2h5v5M8 2L2.5 7.5" />
-            </svg>
-          </a>
-        ) : null}
+        {props.review?.verdict ? <Glyph verdict={props.review.verdict} /> : null}
+        {props.badges}
+        {counts}
       </div>
-      <h1>{meta ? displayTitle(meta.title) : <Skeleton width={420} height={18} />}</h1>
-      {props.entry.pr.why ? <p className="pr-why">{props.entry.pr.why}</p> : null}
-      <div className="pr-stats tabular">
-        {meta ? (
-          <>
-            {stats.join(" · ")}
-            {meta.additions ? <span className="add"> +{meta.additions}</span> : null}
-            {meta.deletions ? <span className="del"> −{meta.deletions}</span> : null}
+      <header className="pr-bar">
+        <span className="pr-num">{label}</span>
+        <div className="pr-title-row">
+          <h1>{title ?? <Skeleton width={420} height={16} />}</h1>
+          {props.review?.verdict ? (
+            <span className={`verdict-chip is-${props.review.verdict}`}>
+              <Glyph verdict={props.review.verdict} />
+              {VERDICT_LABEL[props.review.verdict]}
+            </span>
+          ) : null}
+          {props.badges}
+        </div>
+        {props.entry.pr.why ? <p className="pr-why">{props.entry.pr.why}</p> : null}
+        {props.review?.reason ? (
+          <p className="pr-reason">
+            <span>Rejected</span>
+            {props.review.reason}
+          </p>
+        ) : null}
+        {props.children}
+        <div className="pr-foot">
+          <span className="pr-foot-left">
             {props.viewed ? (
               <span className={props.viewed.done === props.viewed.total ? "is-all-viewed" : undefined}>
                 {props.viewed.done}/{props.viewed.total} files viewed
@@ -178,18 +191,11 @@ export function PrHeader(props: {
                 <Glyph verdict={props.state.reviews[number]?.verdict} />
               </span>
             ))}
-          </>
-        ) : (
-          <Skeleton width={160} />
-        )}
-      </div>
-      {props.review?.reason ? (
-        <p className="pr-reason">
-          <span>Rejected</span>
-          {props.review.reason}
-        </p>
-      ) : null}
-    </header>
+          </span>
+          {counts ?? <Skeleton width={160} />}
+        </div>
+      </header>
+    </>
   )
 }
 
@@ -432,7 +438,7 @@ export function Summary(props: {
   return (
     <div className="summary view-enter" ref={ref}>
       <div className="summary-inner">
-        <div className="pr-context">Summary</div>
+        <div className="summary-kicker">Summary</div>
         <h1>{props.manifest.title}</h1>
         {props.manifest.summary ? <p className="pr-why">{props.manifest.summary}</p> : null}
         <div className="stats">

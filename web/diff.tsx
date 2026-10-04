@@ -32,7 +32,7 @@ export type FileBlockProps = {
 // Injected into the diff's shadow root. Keeps the diff chrome quiet and draws one cursor indicator.
 const BASE_CSS = /* css */ `
 :host { --diffs-bg: var(--bg); background-color: var(--bg); }
-[data-diffs-header] { position: sticky; top: 0; z-index: 3; min-height: 0; padding: 0; background: var(--bg); }
+[data-diffs-header] { position: sticky; top: var(--sticky-offset, 0); z-index: 3; min-height: 0; padding: 0; background: var(--bg); }
 /* Unmodified-lines gap: a thin squiggle across every column, with the count on a chip at the code's text start. */
 [data-separator=line-info-basic] { height: 22px; margin: 0; background-color: var(--bg); }
 [data-separator=line-info-basic]::before {

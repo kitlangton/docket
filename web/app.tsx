@@ -65,6 +65,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const [handedBack, setHandedBack] = useState<string | null>(null)
   const [folds, setFolds] = useState<Record<string, boolean>>({})
   const [stamped, setStamped] = useState<string | null>(null)
+  const [condensed, setCondensed] = useState(false)
   const mainRef = useRef<HTMLDivElement>(null)
   const scrollIntent = useRef<ScrollIntent>("top")
   const pendingG = useRef(0)
@@ -292,6 +293,15 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     if (marking && cursor.file + 1 < model.files.length) jumpToFile(cursor.file + 1)
   }
 
+  const updateCondensed = () => {
+    const main = mainRef.current
+    const title = main?.querySelector<HTMLElement>(".pr-bar .pr-title-row")
+    if (!main || !title) return
+    // Pin once the title row slides under where the pinned bar sits.
+    setCondensed(title.getBoundingClientRect().bottom - main.getBoundingClientRect().top < 30)
+  }
+  useEffect(updateCondensed, [current, view])
+
   const handBack = async () => {
     const res = await fetch("/api/handback", { method: "POST", body: JSON.stringify(state) })
     const body: { path: string } = await res.json()
@@ -449,7 +459,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     const isG = key === "g" && Date.now() - pendingG.current < 600
     pendingG.current = key === "g" && !isG ? Date.now() : 0
     if (key === "g") {
-      if (isG) moveCursor(HEADER, "top")
+      if (isG) {
+        moveCursor(HEADER, "top")
+        if (mainRef.current) mainRef.current.scrollTop = 0
+      }
       return true
     }
     switch (key) {
@@ -631,26 +644,27 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
           }}
         />
       ) : (
-        <main className="main" ref={mainRef}>
+        <main className="main" ref={mainRef} onScroll={updateCondensed}>
           <div className="pr-view view-enter" key={current}>
             <PrHeader
               entry={entry}
               load={load}
               review={review}
               state={state}
-              total={order.length}
+              condensed={condensed}
               viewed={
                 model && viewed.size
                   ? { done: model.files.filter((file) => viewed.has(file.name)).length, total: model.files.length }
                   : null
               }
-            />
-            <PrNotes
-              notes={prNotes}
-              focus={cursorIndex === HEADER ? noteFocus : null}
-              onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
-              onDelete={deleteNote}
-            />
+            >
+              <PrNotes
+                notes={prNotes}
+                focus={cursorIndex === HEADER ? noteFocus : null}
+                onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
+                onDelete={deleteNote}
+              />
+            </PrHeader>
             {load && !load.ok ? (
               <div className="error">
                 Could not load {current}: {load.error}
