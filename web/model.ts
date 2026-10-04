@@ -71,6 +71,12 @@ export function countVerdicts(order: number[], state: ReviewState) {
   return { approve: count("approve"), reject: count("reject"), skip: count("skip"), unreviewed: count(null) }
 }
 
+/** Strips a conventional-commit prefix like `refactor(tui): ` and capitalizes the rest. */
+export function displayTitle(title: string) {
+  const stripped = title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, "")
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1)
+}
+
 function range(length: number) {
   return Array.from({ length }, (_, index) => index)
 }

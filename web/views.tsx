@@ -1,21 +1,22 @@
 import { useEffect, useRef, useState } from "react"
 import type { Manifest, PrLoad, PrReview, ReviewState, Verdict } from "../src/types"
-import { countVerdicts, noteCount, type Entry } from "./model"
+import { countVerdicts, displayTitle, noteCount, type Entry } from "./model"
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
 const VERDICT_GLYPH: Record<Verdict, string> = { approve: "✓", reject: "✕", skip: "–" }
 
-export function VerdictPill(props: { verdict: Verdict | null | undefined; compact?: boolean }) {
-  if (!props.verdict) return null
-  return (
-    <span className={`verdict verdict-${props.verdict}`}>
-      {props.compact ? VERDICT_GLYPH[props.verdict] : `${VERDICT_GLYPH[props.verdict]} ${VERDICT_LABEL[props.verdict]}`}
-    </span>
-  )
+export function Glyph(props: { verdict: Verdict | null | undefined }) {
+  if (!props.verdict) return <span className="glyph">○</span>
+  return <span className={`glyph is-${props.verdict}`}>{VERDICT_GLYPH[props.verdict]}</span>
 }
 
-export function StateBadge(props: { state: string }) {
-  return <span className={`state state-${props.state.toLowerCase()}`}>{props.state.toLowerCase()}</span>
+export function VerdictLabel(props: { verdict: Verdict | null | undefined }) {
+  if (!props.verdict) return <span className="verdict-label">Unreviewed</span>
+  return (
+    <span className={`verdict-label is-${props.verdict}`}>
+      {VERDICT_GLYPH[props.verdict]} {VERDICT_LABEL[props.verdict]}
+    </span>
+  )
 }
 
 export function Rail(props: {
@@ -35,38 +36,28 @@ export function Rail(props: {
       {props.manifest.groups.map((group) => (
         <div className="rail-group" key={group.title}>
           <div className="rail-group-title">{group.title}</div>
+          {group.why ? (
+            <div className="rail-group-why" title={group.why}>
+              {group.why}
+            </div>
+          ) : null}
           {group.prs.map((pr) => {
             const load = props.prs[pr.number]
-            const meta = load?.ok ? load.data.meta : undefined
             const review = props.state.reviews[pr.number]
             const notes = noteCount(review)
+            const title = load?.ok ? displayTitle(load.data.meta.title) : load ? "Failed to load" : "Loading…"
             return (
               <button
                 key={pr.number}
-                className={`rail-pr${pr.number === props.current ? " is-current" : ""}${review?.verdict ? ` is-${review.verdict}` : ""}`}
+                className={`rail-pr${pr.number === props.current ? " is-current" : ""}${review?.verdict ? " is-done" : ""}`}
+                title={pr.after?.length ? `${title}\nAfter ${pr.after.map((n) => `#${n}`).join(", ")}` : title}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => props.onSelect(pr.number)}
               >
-                <span className="rail-mark">
-                  {review?.verdict ? <VerdictPill verdict={review.verdict} compact /> : <span className="dot" />}
-                </span>
-                <span className="rail-main">
-                  <span className="rail-line">
-                    <span className="rail-num">#{pr.number}</span>
-                    <span className="rail-pr-title">{meta ? stripPrefix(meta.title) : load ? "failed to load" : "loading…"}</span>
-                  </span>
-                  <span className="rail-sub">
-                    {meta ? (
-                      <>
-                        <span className="add">+{meta.additions}</span>
-                        <span className="del">−{meta.deletions}</span>
-                      </>
-                    ) : null}
-                    {meta && meta.state !== "OPEN" ? <StateBadge state={meta.state} /> : null}
-                    {pr.after?.length ? <span className="after">after {pr.after.map((n) => `#${n}`).join(", ")}</span> : null}
-                    {notes ? <span className="rail-notes">✎ {notes}</span> : null}
-                  </span>
-                </span>
+                <Glyph verdict={review?.verdict} />
+                <span className="rail-pr-title">{title}</span>
+                {notes ? <span className="rail-notes">{notes}</span> : null}
+                <span className="rail-num">{pr.number}</span>
               </button>
             )
           })}
@@ -78,126 +69,114 @@ export function Rail(props: {
 
 export function PrHeader(props: { entry: Entry; load: PrLoad | undefined; review: PrReview | undefined; state: ReviewState; total: number }) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
+  const stats = meta
+    ? [
+        `${meta.changedFiles} file${meta.changedFiles === 1 ? "" : "s"}`,
+        meta.additions ? `+${meta.additions}` : null,
+        meta.deletions ? `−${meta.deletions}` : null,
+      ].filter((value) => value !== null)
+    : []
   return (
     <header className="pr-header">
-      <div className="pr-kicker">
+      <div className="pr-context">
         <span>{props.entry.group.title}</span>
-        <span className="sep">/</span>
+        <span className="dot-sep">·</span>
         <span>
           {props.entry.index + 1} of {props.total}
         </span>
-      </div>
-      <div className="pr-title-row">
-        <h1>
-          <span className="pr-num">#{props.entry.pr.number}</span> {meta?.title ?? "Loading…"}
-        </h1>
-        {meta ? <StateBadge state={meta.state} /> : null}
-        <VerdictPill verdict={props.review?.verdict} />
-      </div>
-      <p className="pr-why">{props.entry.pr.why}</p>
-      {props.entry.group.why ? <p className="group-why">{props.entry.group.why}</p> : null}
-      <div className="pr-meta">
+        <span className="dot-sep">·</span>
+        <span>#{props.entry.pr.number}</span>
+        {meta && meta.state !== "OPEN" ? <span className="pr-state">{meta.state === "MERGED" ? "Merged" : "Closed"}</span> : null}
+        <span className="spacer" />
+        {props.review?.verdict ? <VerdictLabel verdict={props.review.verdict} /> : null}
         {meta ? (
-          <>
-            <span className="add">+{meta.additions}</span>
-            <span className="del">−{meta.deletions}</span>
-            <span>
-              {meta.changedFiles} file{meta.changedFiles === 1 ? "" : "s"}
-            </span>
-            <span className="mono">{meta.headRefName}</span>
-            <a href={meta.url} target="_blank" rel="noreferrer">
-              GitHub ↗
-            </a>
-          </>
+          <a href={meta.url} target="_blank" rel="noreferrer">
+            GitHub ↗
+          </a>
         ) : null}
+      </div>
+      <h1>{meta ? displayTitle(meta.title) : "Loading…"}</h1>
+      <p className="pr-why">{props.entry.pr.why}</p>
+      <div className="pr-stats">
+        {stats.join(" · ")}
         {props.entry.pr.after?.map((number) => (
-          <span key={number} className="after">
-            after #{number} <VerdictPill verdict={props.state.reviews[number]?.verdict} compact />
+          <span key={number}>
+            {" · "}after #{number}
+            {props.state.reviews[number]?.verdict ? <> <Glyph verdict={props.state.reviews[number]?.verdict} /></> : null}
           </span>
         ))}
       </div>
       {props.review?.reason ? (
-        <div className="callout callout-reject">
-          <span className="callout-label">Reject reason</span>
+        <p className="pr-aside">
+          <span className="pr-aside-label">Reject reason</span>
           {props.review.reason}
-        </div>
+        </p>
       ) : null}
       {props.review?.prNote ? (
-        <div className="callout">
-          <span className="callout-label">PR note</span>
+        <p className="pr-aside">
+          <span className="pr-aside-label">Note</span>
           {props.review.prNote}
-        </div>
+        </p>
       ) : null}
     </header>
   )
 }
 
-export function StatusBar(props: { order: number[]; state: ReviewState; diffStyle: string; ignoreWhitespace: boolean; position: string }) {
+export function StatusBar(props: { order: number[]; state: ReviewState; mode: string; position: string }) {
   const counts = countVerdicts(props.order, props.state)
   const reviewed = props.order.length - counts.unreviewed
   return (
     <footer className="status">
-      <div className="hints">
-        <Hint k="j k">hunk</Hint>
-        <Hint k="] [">file</Hint>
-        <Hint k="J K">PR</Hint>
-        <Hint k="n">note</Hint>
-        <Hint k="a">approve</Hint>
-        <Hint k="r">reject</Hint>
-        <Hint k="s">skip</Hint>
-        <Hint k="⏎">summary</Hint>
-        <Hint k="?">help</Hint>
-      </div>
-      <div className="status-right">
-        <span className="muted">{props.position}</span>
-        <span className="muted">
-          {props.diffStyle}
-          {props.ignoreWhitespace ? " · ignoring whitespace" : ""}
+      <span className="status-left">
+        <span>
+          <kbd>?</kbd> keys
         </span>
-        <span className="progress">
-          <span className="progress-bar">
-            <span style={{ width: `${(reviewed / Math.max(1, props.order.length)) * 100}%` }} />
-          </span>
-          {reviewed}/{props.order.length} reviewed
+        {props.position ? <span className="muted">{props.position}</span> : null}
+        {props.mode ? <span className="muted">{props.mode}</span> : null}
+      </span>
+      <span className="progress">
+        <span className="progress-bar">
+          <span style={{ width: `${(reviewed / Math.max(1, props.order.length)) * 100}%` }} />
         </span>
-      </div>
+        {reviewed} of {props.order.length} reviewed
+      </span>
     </footer>
   )
 }
 
-function Hint(props: { k: string; children: string }) {
-  return (
-    <span className="hint">
-      <kbd>{props.k}</kbd>
-      {props.children}
-    </span>
-  )
-}
-
-const HELP: [string, string][][] = [
+const HELP: [string, [string, string][]][] = [
   [
-    ["j / k", "Next / previous change"],
-    ["Ctrl-n / Ctrl-p", "Next / previous line"],
-    ["] / [", "Next / previous file"],
-    ["J / K", "Next / previous PR"],
-    ["g g / G", "Top / bottom of PR"],
-    ["Ctrl-d / Ctrl-u", "Half page down / up"],
+    "Move",
+    [
+      ["j  k", "Next / previous change"],
+      ["⌃n  ⌃p", "Next / previous line"],
+      ["]  [", "Next / previous file"],
+      ["J  K", "Next / previous PR"],
+      ["gg  G", "Top / bottom of PR"],
+      ["⌃d  ⌃u", "Half page down / up"],
+    ],
   ],
   [
-    ["a", "Approve and advance"],
-    ["r", "Reject (with reason) and advance"],
-    ["s", "Skip and advance"],
-    ["u", "Clear verdict"],
-    ["n", "Note on cursor line (edit if one exists)"],
-    ["N", "PR-level note"],
+    "Review",
+    [
+      ["a", "Approve and advance"],
+      ["r", "Reject with reason and advance"],
+      ["s", "Skip and advance"],
+      ["u", "Clear verdict"],
+      ["n", "Note on cursor line"],
+      ["N", "Note on the PR"],
+    ],
   ],
   [
-    ["v", "Split / unified"],
-    ["z", "Ignore whitespace"],
-    ["o", "Open PR on GitHub"],
-    ["Enter or :", "Summary"],
-    ["w", "Write verdicts (summary)"],
-    ["?", "This help"],
+    "View",
+    [
+      ["o  ⏎", "Fold / unfold file"],
+      ["v", "Split / unified"],
+      ["z", "Ignore whitespace"],
+      ["O", "Open on GitHub"],
+      ["⏎  :", "Summary"],
+      ["w", "Write verdicts (in summary)"],
+    ],
   ],
 ]
 
@@ -205,24 +184,19 @@ export function Help(props: { onClose: () => void }) {
   return (
     <div className="overlay" onClick={props.onClose}>
       <div className="help" onClick={(event) => event.stopPropagation()}>
-        <div className="help-title">Keyboard</div>
-        <div className="help-cols">
-          {HELP.map((column, index) => (
-            <dl key={index}>
-              {column.map(([key, label]) => (
+        {HELP.map(([title, rows]) => (
+          <section key={title}>
+            <h2>{title}</h2>
+            <dl>
+              {rows.map(([key, label]) => (
                 <div key={key}>
-                  <dt>
-                    <kbd>{key}</kbd>
-                  </dt>
+                  <dt>{key}</dt>
                   <dd>{label}</dd>
                 </div>
               ))}
             </dl>
-          ))}
-        </div>
-        <div className="help-foot">
-          Press <kbd>?</kbd> or <kbd>Esc</kbd> to close
-        </div>
+          </section>
+        ))}
       </div>
     </div>
   )
@@ -261,9 +235,7 @@ export function Prompt(props: {
             }
           }}
         />
-        <div className="draft-hint">
-          <kbd>Enter</kbd> confirm · <kbd>Shift Enter</kbd> newline · <kbd>Esc</kbd> cancel
-        </div>
+        <div className="draft-hint">Enter to confirm · Shift-Enter for newline · Esc to cancel</div>
       </div>
     </div>
   )
@@ -288,20 +260,26 @@ export function Summary(props: {
   return (
     <div className="summary" ref={ref}>
       <div className="summary-inner">
-        <div className="pr-kicker">Summary</div>
-        <h1 className="summary-title">{props.manifest.title}</h1>
-        <div className="counts">
-          <Count label="Approved" value={counts.approve} kind="approve" />
-          <Count label="Rejected" value={counts.reject} kind="reject" />
-          <Count label="Skipped" value={counts.skip} kind="skip" />
-          <Count label="Unreviewed" value={counts.unreviewed} kind="none" />
-        </div>
-        <div className="write-row">
-          <span>
-            <kbd>w</kbd> write verdicts to <span className="mono">{props.outPath}</span>
-          </span>
-          {props.written ? <span className="written">✓ Written at {props.written}</span> : null}
-        </div>
+        <div className="pr-context">Summary</div>
+        <h1>{props.manifest.title}</h1>
+        <p className="summary-counts">
+          <span className="is-approve">{counts.approve} approved</span>
+          <span className="dot-sep">·</span>
+          <span className="is-reject">{counts.reject} rejected</span>
+          <span className="dot-sep">·</span>
+          <span className="is-skip">{counts.skip} skipped</span>
+          <span className="dot-sep">·</span>
+          <span>{counts.unreviewed} unreviewed</span>
+        </p>
+        <p className="summary-write">
+          {props.written ? (
+            <span className="written">Written at {props.written} to {props.outPath}</span>
+          ) : (
+            <>
+              <kbd>w</kbd> writes verdicts to <span className="mono">{props.outPath}</span>
+            </>
+          )}
+        </p>
         <div className="summary-list">
           {props.entries.map((entry, index) => {
             const load = props.prs[entry.pr.number]
@@ -313,19 +291,16 @@ export function Summary(props: {
                 onClick={() => props.onOpen(entry.pr.number)}
               >
                 <div className="summary-head">
-                  <span className="summary-verdict">
-                    {review?.verdict ? <VerdictPill verdict={review.verdict} /> : <span className="unreviewed">Unreviewed</span>}
-                  </span>
-                  <span className="rail-num">#{entry.pr.number}</span>
-                  <span className="summary-pr-title">{load?.ok ? load.data.meta.title : ""}</span>
+                  <Glyph verdict={review?.verdict} />
+                  <span className="summary-pr-title">{load?.ok ? displayTitle(load.data.meta.title) : ""}</span>
+                  <span className="rail-num">{entry.pr.number}</span>
                 </div>
-                {review?.reason ? <div className="summary-detail reject-reason">{review.reason}</div> : null}
+                {review?.reason ? <div className="summary-detail">{review.reason}</div> : null}
                 {review?.prNote ? <div className="summary-detail">{review.prNote}</div> : null}
                 {review?.notes.map((note) => (
                   <div key={note.id} className="summary-detail">
-                    <span className="mono loc">
-                      {note.path}:{note.side === "deletions" ? "L" : "R"}
-                      {note.line}
+                    <span className="loc">
+                      {note.path.split("/").at(-1)}:{note.line}
                     </span>
                     {note.body}
                   </div>
@@ -334,23 +309,8 @@ export function Summary(props: {
             )
           })}
         </div>
-        <div className="summary-foot">
-          <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open PR · <kbd>Esc</kbd> back to deck
-        </div>
+        <div className="summary-foot">j k move · ⏎ open · Esc back</div>
       </div>
     </div>
   )
-}
-
-function Count(props: { label: string; value: number; kind: string }) {
-  return (
-    <div className={`count count-${props.kind}`}>
-      <div className="count-value">{props.value}</div>
-      <div className="count-label">{props.label}</div>
-    </div>
-  )
-}
-
-function stripPrefix(title: string) {
-  return title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, "")
 }

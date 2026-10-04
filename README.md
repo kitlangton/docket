@@ -44,14 +44,15 @@ Review progress is saved continuously to `<session>.state.json` next to the sess
 | `u`                 | Clear the verdict                          |
 | `n`                 | Note on the cursor line (edits an existing note there) |
 | `N`                 | PR-level note                              |
+| `o`                 | Fold / unfold the file under the cursor (deleted files start folded) |
 | `v`                 | Toggle split / unified                     |
 | `z`                 | Toggle ignoring whitespace                 |
-| `o`                 | Open the PR on GitHub                      |
-| `Enter` or `:`      | Summary                                    |
+| `O`                 | Open the PR on GitHub                      |
+| `Enter` or `:`      | Summary (`Enter` unfolds a folded file first) |
 | `w`                 | Write `verdicts.json` (on the summary screen) |
 | `?`                 | Help                                       |
 
-In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels. Saving an empty note deletes it. The mouse works too: click a line to move the cursor there, click the `+` in the gutter to add a note, and click a note to edit it.
+In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels. Saving an empty note deletes it. The mouse works too: click a line to move the cursor there, hover the cursor line's number and click `+` to add a note, click a file header to fold it, and click a note to edit it.
 
 ## Session manifest
 

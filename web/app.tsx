@@ -78,6 +78,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [summaryIndex, setSummaryIndex] = useState(0)
   const [written, setWritten] = useState<string | null>(null)
+  const [folds, setFolds] = useState<Record<string, boolean>>({})
   const mainRef = useRef<HTMLDivElement>(null)
   const scrollIntent = useRef<ScrollIntent>("reset")
   const pendingG = useRef(0)
@@ -98,6 +99,15 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const review = state.reviews[current]
   const cursorIndex = model ? Math.min(cursors[current] ?? model.blocks[0]?.first ?? 0, Math.max(0, model.rows.length - 1)) : 0
   const cursor: Row | undefined = model?.rows[cursorIndex]
+  const isCollapsed = (fileIndex: number) => {
+    const file = model?.files[fileIndex]
+    if (!file) return false
+    return folds[`${current}:${file.name}`] ?? file.type === "deleted"
+  }
+  // Blocks inside a folded file collapse into one stop at that file's header.
+  const navBlocks = (model?.blocks ?? []).filter(
+    (block, index, blocks) => !isCollapsed(block.file) || blocks.findIndex((b) => b.file === block.file) === index,
+  )
 
   // Persist review state shortly after each change.
   const firstSave = useRef(true)
@@ -169,6 +179,17 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     [draft, current, updateReview],
   )
 
+  const toggleFold = useCallback(
+    (path: string) => {
+      const file = model?.files.find((item) => item.name === path)
+      if (!file) return
+      const key = `${current}:${path}`
+      scrollIntent.current = "top"
+      setFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? file.type === "deleted") }))
+    },
+    [model, current],
+  )
+
   const cancelDraft = useCallback(() => setDraft(null), [])
   const editNote = useCallback((note: Note) => setDraft({ ...note, noteId: note.id }), [])
   const clickLine = useCallback(
@@ -180,8 +201,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   )
 
   const writeVerdicts = async () => {
-    const res = await fetch("/api/verdicts", { method: "POST", body: JSON.stringify(state) })
-    const body: { path: string } = await res.json()
+    await fetch("/api/verdicts", { method: "POST", body: JSON.stringify(state) })
     setWritten(`${new Date().toLocaleTimeString()}`)
   }
 
@@ -265,7 +285,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const deckKey = (key: string) => {
     if (help) return closeHelp(key)
     const rows = model?.rows ?? []
-    const blocks = model?.blocks ?? []
+    const blocks = navBlocks
     const half = (mainRef.current?.clientHeight ?? 600) / 2
     const isG = key === "g" && Date.now() - pendingG.current < 600
     pendingG.current = key === "g" && !isG ? Date.now() : 0
@@ -334,7 +354,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         updateReview(current, (prev) => ({ ...prev, verdict: null, reason: undefined }))
         return true
       case "n":
-        if (cursor && model) openDraft(model.files[cursor.file]!.name, cursor.side, cursor.line)
+        if (!cursor || !model) return true
+        if (isCollapsed(cursor.file)) toggleFold(model.files[cursor.file]!.name)
+        openDraft(model.files[cursor.file]!.name, cursor.side, cursor.line)
         return true
       case "N":
         setPrompt("prNote")
@@ -351,7 +373,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         setCursors((prev) => ({ ...prev, [current]: 0 }))
         setIgnoreWhitespace((value) => !value)
         return true
-      case "o": {
+      case "o":
+        if (cursor && model) toggleFold(model.files[cursor.file]!.name)
+        return true
+      case "O": {
         const load = session.prs[current]
         if (load?.ok) window.open(load.data.meta.url, "_blank")
         return true
@@ -360,6 +385,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         setHelp(true)
         return true
       case "Enter":
+        if (cursor && model && isCollapsed(cursor.file)) {
+          toggleFold(model.files[cursor.file]!.name)
+          return true
+        }
+        setSummaryIndex(order.indexOf(current))
+        setView("summary")
+        return true
       case ":":
         setSummaryIndex(order.indexOf(current))
         setView("summary")
@@ -417,6 +449,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
                 index={index}
                 file={file}
                 focus={model.focus.has(file.name)}
+                collapsed={isCollapsed(index)}
+                cursorHere={cursor?.file === index}
                 notes={notesByFile.get(file.name) ?? NO_NOTES}
                 draft={draft && draft.path === file.name ? draft : null}
                 selection={selectionFor(index)}
@@ -426,15 +460,19 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
                 onSaveDraft={saveDraft}
                 onCancelDraft={cancelDraft}
                 onEditNote={editNote}
+                onToggle={toggleFold}
               />
             ))}
           </div>
-          <div className="end-of-pr">
-            End of #{current} · <kbd>a</kbd> approve · <kbd>r</kbd> reject · <kbd>s</kbd> skip · <kbd>J</kbd> next PR
-          </div>
+          <div className="end-of-pr">End of #{current}</div>
         </main>
       )}
-      <StatusBar order={order} state={state} diffStyle={diffStyle} ignoreWhitespace={ignoreWhitespace} position={view === "deck" ? position : ""} />
+      <StatusBar
+        order={order}
+        state={state}
+        position={view === "deck" ? position : ""}
+        mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
+      />
       {help ? <Help onClose={() => setHelp(false)} /> : null}
       {prompt === "reject" ? (
         <Prompt
@@ -468,7 +506,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
 const NO_NOTES: Note[] = []
 
 function rowElement(main: HTMLElement, row: Row) {
-  const host = main.querySelector(`[data-file-index="${row.file}"] ${DIFFS_TAG_NAME}`)
+  const section = main.querySelector<HTMLElement>(`[data-file-index="${row.file}"]`)
+  if (section?.hasAttribute("data-collapsed")) return section
+  const host = section?.querySelector(DIFFS_TAG_NAME)
   const root = host?.shadowRoot
   if (!root) return null
   const column = root.querySelector(row.side === "deletions" ? "[data-deletions]" : "[data-additions]") ?? root
