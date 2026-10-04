@@ -20,6 +20,7 @@ export type FileBlockProps = {
   /** Visual mode: show the selection as a range instead of the cursor. */
   visual: boolean
   diffStyle: "split" | "unified"
+  separator: SeparatorStyle
   onLine: (file: number, side: Side, line: number) => void
   /** A range picked with the mouse; `compose` is true when it came from the gutter + button. */
   onRange: (file: number, range: SelectedLineRange, compose: boolean) => void
@@ -33,35 +34,6 @@ export type FileBlockProps = {
 const BASE_CSS = /* css */ `
 :host { --diffs-bg: var(--bg); background-color: var(--bg); }
 [data-diffs-header] { position: sticky; top: var(--sticky-offset, 0); z-index: 3; min-height: 0; padding: 0; background: var(--bg); }
-/* Unmodified-lines gap: a thin squiggle across every column, with the count on a chip at the code's text start. */
-[data-separator=line-info-basic] { height: 22px; margin: 0; background-color: var(--bg); }
-[data-separator=line-info-basic]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-color: var(--squiggle);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0.5 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 6px;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0.5 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 6px;
-  pointer-events: none;
-}
-/* Anchor the wave so it runs continuously from each gutter into its code column. */
-[data-gutter] [data-separator=line-info-basic]::before { -webkit-mask-position: right center; mask-position: right center; }
-[data-separator=line-info-basic] [data-separator-wrapper] { display: none; }
-:is([data-deletions], [data-unified]) [data-content] [data-separator=line-info-basic] [data-separator-wrapper] {
-  display: flex;
-  z-index: 1;
-  background: transparent;
-  pointer-events: none;
-}
-[data-separator=line-info-basic] [data-separator-content] { background: transparent; padding: 0 0 0 1ch; overflow: visible; }
-[data-unmodified-lines] {
-  padding: 0 7px;
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--text-3);
-  font: 11px/16px var(--sans);
-  font-variant-numeric: tabular-nums;
-}
 [data-line], [data-no-newline] { --mix-dark: 88%; }
 [data-gutter-buffer], [data-column-number] { --mix-dark: 91%; }
 [data-content-buffer] { opacity: 0.5; }
@@ -83,6 +55,75 @@ const BASE_CSS = /* css */ `
 [data-column-number][data-selected-line][data-line-type=change-addition] { color: var(--approve); }
 [data-column-number][data-selected-line][data-line-type=change-deletion] { color: var(--reject); }
 `
+
+export const SEPARATOR_STYLES = ["ellipsis", "hairline", "gap", "dotted", "squiggle-faint"] as const
+export type SeparatorStyle = (typeof SEPARATOR_STYLES)[number]
+
+// Unmodified-lines rows. Every variant hides the library's label and draws with pseudo-elements, reading the
+// count from data-count (stamped in onPostRender). The left gutter is the deletions or unified gutter.
+const SEPARATOR_BASE = /* css */ `
+[data-separator=line-info-basic] { height: 16px; background-color: transparent; }
+[data-separator=line-info-basic] [data-separator-wrapper] { display: none; }
+[data-separator=line-info-basic]::before, [data-separator=line-info-basic]::after { position: absolute; pointer-events: none; }
+`
+const GUTTER_COUNT = /* css */ `
+:is([data-deletions], [data-unified]) [data-gutter] [data-separator=line-info-basic]::after {
+  content: attr(data-count);
+  top: 0; right: 0; padding: 0 1ch 0 4px;
+  background: var(--bg);
+  color: var(--text-4);
+  font: 10px/16px var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+`
+const TEXT_COUNT = /* css */ `
+:is([data-deletions], [data-unified]) [data-content] [data-separator=line-info-basic]::after {
+  content: "… " attr(data-count) " lines";
+  top: 0; left: 1ch; padding-right: 6px;
+  background: var(--bg);
+  color: var(--text-4);
+  font: 11px/18px var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+`
+const SEPARATOR_CSS: Record<SeparatorStyle, string> = {
+  hairline:
+    GUTTER_COUNT +
+    `[data-separator=line-info-basic]::before { content: ""; left: 0; right: 0; top: 50%; border-top: 1px solid var(--sep); }`,
+  gap: /* css */ `
+[data-separator=line-info-basic] { height: 8px; }
+:is([data-deletions], [data-unified]) [data-gutter] [data-separator=line-info-basic]::after {
+  content: "⋯"; top: 0; right: 1ch; color: var(--text-4); font: 10px/8px var(--sans);
+}
+:is([data-deletions], [data-unified]) [data-gutter] [data-separator=line-info-basic]:hover::after { content: attr(data-count); }
+`,
+  ellipsis: `[data-separator=line-info-basic] { height: 18px; }` + TEXT_COUNT,
+  dotted:
+    GUTTER_COUNT +
+    `[data-separator=line-info-basic]::before { content: ""; left: 0; right: 0; top: 50%; border-top: 1px dotted var(--sep-strong); }`,
+  "squiggle-faint":
+    `[data-separator=line-info-basic] { height: 18px; }` +
+    TEXT_COUNT +
+    /* css */ `
+[data-separator=line-info-basic]::before {
+  content: ""; inset: 0;
+  background-color: var(--sep);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='4' viewBox='0 0 12 4'%3E%3Cpath d='M0 2 Q3 0.8 6 2 T12 2' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 4px;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='4' viewBox='0 0 12 4'%3E%3Cpath d='M0 2 Q3 0.8 6 2 T12 2' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 4px;
+}
+[data-gutter] [data-separator=line-info-basic]::before { -webkit-mask-position: right center; mask-position: right center; }
+`,
+}
+
+/** Stamps each unmodified-lines row with its count so the separator CSS can render it. */
+function stampSeparators(node: HTMLElement) {
+  node.shadowRoot?.querySelectorAll<HTMLElement>("[data-separator]").forEach((element) => {
+    const count = element.textContent?.match(/\d+/)?.[0]
+    if (!count) return
+    element.dataset.count = count
+    element.title = `${count} unmodified lines`
+  })
+}
 
 const CURSOR_CSS = /* css */ `
 [data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 40%, transparent); }
@@ -111,7 +152,10 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       hunkSeparators: "line-info-basic",
       lineDiffType: "word-alt",
       overflow: "scroll",
-      unsafeCSS: BASE_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
+      unsafeCSS: BASE_CSS + SEPARATOR_BASE + SEPARATOR_CSS[props.separator] + (props.visual ? VISUAL_CSS : CURSOR_CSS),
+      onPostRender: (node, _instance, phase) => {
+        if (phase !== "unmount") stampSeparators(node)
+      },
       enableGutterUtility: true,
       enableLineSelection: true,
       onGutterUtilityClick: (range) => onRange(index, range, true),
@@ -120,7 +164,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       },
       onLineClick: (event) => onLine(index, event.annotationSide, event.lineNumber),
     }),
-    [props.diffStyle, props.visual, onLine, onRange, index],
+    [props.diffStyle, props.separator, props.visual, onLine, onRange, index],
   )
 
   const annotations = useMemo(() => {

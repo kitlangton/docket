@@ -1,7 +1,7 @@
 import { DIFFS_TAG_NAME, type SelectedLineRange } from "@pierre/diffs"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { itemLabel, type Note, type PrReview, type ReviewState, type SessionPayload, type Side, type Verdict } from "../src/types"
-import { FileBlock, type Draft } from "./diff"
+import { FileBlock, SEPARATOR_STYLES, type Draft, type SeparatorStyle } from "./diff"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
 import { FilePalette, HandedBack, Help, PrHeader, PrNotes, PrSkeleton, Prompt, Rail, StatusBar, Summary, VerdictPrompt } from "./views"
 
@@ -57,6 +57,15 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     localStorage.getItem("docket.diffStyle") === "unified" ? "unified" : "split",
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
+  const [separator, setSeparator] = useState<SeparatorStyle>(
+    () => SEPARATOR_STYLES.find((style) => style === localStorage.getItem("docket.separator")) ?? "ellipsis",
+  )
+  const [toast, setToast] = useState<{ text: string; at: number } | null>(null)
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 1200)
+    return () => clearTimeout(timer)
+  }, [toast])
   const [help, setHelp] = useState(false)
   const [palette, setPalette] = useState(false)
   const [prompt, setPrompt] = useState<PromptState | null>(null)
@@ -550,6 +559,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         setDiffStyle(next)
         return true
       }
+      case ",": {
+        const next = SEPARATOR_STYLES[(SEPARATOR_STYLES.indexOf(separator) + 1) % SEPARATOR_STYLES.length]!
+        localStorage.setItem("docket.separator", next)
+        setSeparator(next)
+        setToast({ text: `Separator: ${next}`, at: Date.now() })
+        return true
+      }
       case "z":
         scrollIntent.current = "top"
         setCursors((prev) => ({ ...prev, [current]: HEADER }))
@@ -692,6 +708,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
                   selection={selectionFor(index)}
                   visual={Boolean(visual) && cursor?.file === index}
                   diffStyle={diffStyle}
+                  separator={separator}
                   onLine={clickLine}
                   onRange={pickRange}
                   onSaveDraft={saveDraft}
@@ -730,6 +747,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
       />
       {help ? <Help onClose={() => setHelp(false)} /> : null}
+      {toast ? (
+        <div className="toast" key={toast.at}>
+          {toast.text}
+        </div>
+      ) : null}
       {palette && model ? (
         <FilePalette
           files={model.files.map((file) => ({
