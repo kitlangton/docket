@@ -36,39 +36,51 @@ const position = async () => {
 }
 const title = async () => (await world.page.locator(".pr-num").first().textContent())?.trim()
 
+/** Polls until `read` returns `expected`, so slow CI runners don't race the UI. */
+async function settle<T>(read: () => Promise<T>, expected: T, timeout = 15_000) {
+  const deadline = Date.now() + timeout
+  for (let value = await read(); ; value = await read()) {
+    if (JSON.stringify(value) === JSON.stringify(expected) || Date.now() > deadline) return expect<unknown>(value).toEqual(expected)
+    await Bun.sleep(100)
+  }
+}
+
 describe("reviewing", () => {
   test("navigation, notes, verdicts with auto-advance, and hand-back", async () => {
     const { client, url } = await world.start(await manifest())
     await world.open(url)
-    expect(await title()).toBe("main..feature")
+    await settle(title, "main..feature")
 
     await world.press("j")
-    expect(await position()).toBe("app.ts:L50")
+    await settle(position, "app.ts:L50")
     await world.press("j")
-    expect(await position()).toBe("app.ts:L90")
+    await settle(position, "app.ts:L90")
     await world.press("k", "k")
-    expect(await position()).toBe("")
+    await settle(position, "")
 
     // A PR note, then a range note across the change at line 50.
     await world.press("c")
+    await world.page.waitForSelector(".prompt textarea")
     await world.page.keyboard.type("Looks right")
     await world.press("Enter")
-    expect(await world.page.locator(".pr-note").count()).toBe(1)
+    await settle(() => world.page.locator(".pr-note").count(), 1)
     await world.press("j", "V", "j", "c")
+    await world.page.waitForSelector(".draft textarea")
     await world.page.keyboard.type("Why 50?")
     await world.press("Enter")
     expect(await world.page.locator(".note-range").first().textContent()).toBe("Line 50")
 
     await world.press("J")
-    expect(await title()).toBe("main..second")
+    await settle(title, "main..second")
     await world.press("K", "a")
-    expect(await title()).toBe("main..second")
-    expect(await world.page.locator(".rail-pr .glyph.is-approve").count()).toBe(1)
+    await settle(title, "main..second")
+    await settle(() => world.page.locator(".rail-pr .glyph.is-approve").count(), 1)
 
     await world.press("r")
+    await world.page.waitForSelector(".prompt textarea")
     await world.page.keyboard.type("Not yet")
     await world.press("Enter")
-    expect(await world.page.locator(".summary").count()).toBe(1)
+    await settle(() => world.page.locator(".summary").count(), 1)
 
     await world.press("w")
     expect(await client.exited).toBe(0)
@@ -91,11 +103,11 @@ describe("reviewing", () => {
     expect(await files.count()).toBe(2)
 
     await world.press("z", "M")
-    expect(await folded.count()).toBe(2)
+    await settle(() => folded.count(), 2)
     await world.press("z", "R")
-    expect(await folded.count()).toBe(0)
+    await settle(() => folded.count(), 0)
     await world.press("j", "z", "a")
-    expect(await folded.count()).toBe(1)
+    await settle(() => folded.count(), 1)
     await world.press("z", "a")
 
     const visibleLines = () =>
@@ -104,8 +116,10 @@ describe("reviewing", () => {
       )
     const before = await visibleLines()
     await world.press("e")
-    await world.page.waitForTimeout(800)
-    expect(await visibleLines()).toBeGreaterThan(before)
+    await world.page.waitForFunction(
+      (count) => document.querySelector("diffs-container")!.shadowRoot!.querySelectorAll("[data-additions] [data-line]").length > count,
+      before,
+    )
 
     // Clicking a separator's ↕ expands that gap.
     const expanded = await visibleLines()
@@ -119,12 +133,14 @@ describe("reviewing", () => {
     await world.page.keyboard.down("Shift")
     await world.page.mouse.click(box.x, box.y)
     await world.page.keyboard.up("Shift")
-    await world.page.waitForTimeout(800)
-    expect(await visibleLines()).toBeGreaterThan(expanded)
+    await world.page.waitForFunction(
+      (count) => document.querySelector("diffs-container")!.shadowRoot!.querySelectorAll("[data-additions] [data-line]").length > count,
+      expanded,
+    )
 
     await world.press("x")
-    expect(await world.page.locator(".fh-tag.is-viewed").count()).toBe(1)
-    expect(await folded.count()).toBe(1)
+    await settle(() => world.page.locator(".fh-tag.is-viewed").count(), 1)
+    await settle(() => folded.count(), 1)
     expect(await world.page.locator(".pr-counts").textContent()).toContain("1/2 viewed")
   })
 
@@ -132,6 +148,7 @@ describe("reviewing", () => {
     const { url } = await world.start("main..feature")
     await world.open(url)
     await world.press("j", "Control+n", "V", "c")
+    await world.page.waitForSelector(".draft textarea")
     await world.page.keyboard.type("Why 50?")
     await world.press("Enter", "a", "Escape")
 
@@ -141,18 +158,18 @@ describe("reviewing", () => {
     await world.page.evaluate(() => window.dispatchEvent(new Event("focus")))
     await world.page.waitForSelector(".pr-updated")
 
-    expect(await world.page.locator(".updated-dot").count()).toBe(1)
-    expect(await world.page.locator(".verdict-chip.is-stale").count()).toBe(1)
-    expect(await world.page.locator(".note.is-outdated").count()).toBe(1)
+    await settle(() => world.page.locator(".updated-dot").count(), 1)
+    await settle(() => world.page.locator(".verdict-chip.is-stale").count(), 1)
+    await settle(() => world.page.locator(".note.is-outdated").count(), 1)
 
     await world.press("i")
-    await world.page.waitForTimeout(500)
+    await world.page.waitForFunction(() => document.querySelectorAll(".fh-name").length === 1)
     expect(await world.page.locator(".fh-name").allTextContents()).toEqual(["app.ts"])
     await world.press("i")
-    expect(await world.page.locator(".fh-name").count()).toBe(2)
+    await world.page.waitForFunction(() => document.querySelectorAll(".fh-name").length === 2)
 
     await world.press("a", "Escape")
-    expect(await world.page.locator(".verdict-chip.is-stale").count()).toBe(0)
+    await settle(() => world.page.locator(".verdict-chip.is-stale").count(), 0)
   })
 
   test(": commands", async () => {
@@ -160,11 +177,12 @@ describe("reviewing", () => {
     await world.open(url)
     const command = async (text: string) => {
       await world.press(":")
+      await world.page.waitForSelector(".command-input")
       await world.page.keyboard.type(text)
       await world.press("Enter")
     }
     await command("2")
-    expect(await title()).toBe("main..second")
+    await settle(title, "main..second")
     await command("set wrap")
     expect(
       await world.page.evaluate(() =>
@@ -173,7 +191,7 @@ describe("reviewing", () => {
     ).toBe("wrap")
     await command("set nowrap")
     await command("s")
-    expect(await world.page.locator(".summary").count()).toBe(1)
+    await settle(() => world.page.locator(".summary").count(), 1)
     await world.press("Escape")
     await command("bogus")
     expect(await world.page.locator(".status").textContent()).toContain("Not a command")
@@ -195,7 +213,7 @@ describe("one server", () => {
     expect(await statuses()).toEqual({ [first.id]: "waiting", [second.id]: "waiting" })
 
     await world.open(world.base + "/")
-    expect(await world.page.locator(".inbox-row").count()).toBe(2)
+    await settle(() => world.page.locator(".inbox-row").count(), 2)
 
     second.client.proc.kill("SIGINT")
     expect(await second.client.exited).toBe(0)
