@@ -2,6 +2,7 @@ import index from "../web/index.html"
 import { loadAll, manifestItems, readCache } from "./load"
 import type { Session } from "./session"
 import {
+  sizeOf,
   itemId,
   type ItemLoad,
   type Manifest,
@@ -133,6 +134,8 @@ function toVerdicts(sessionPath: string, manifest: Manifest, items: Record<strin
       return {
         ...(item.number !== undefined ? { number: item.number } : { ref: item.ref }),
         ...(load?.ok ? { title: load.data.meta.title } : {}),
+        ...(item.confidence ? { confidence: item.confidence } : {}),
+        ...(load?.ok ? { size: sizeOf(load.data.meta) } : {}),
         verdict: review?.verdict ?? null,
         ...(review?.reason ? { reason: review.reason } : {}),
         notes: (review?.notes ?? []).map((note) => {

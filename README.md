@@ -78,8 +78,15 @@ With the mouse, drag across line numbers to select a range and click **Comment**
       "title": "Theme",
       "why": "Optional group context, shown under each PR's why.",
       "prs": [
-        { "number": 101, "why": "One line on what this PR does and why." },
-        { "number": 102, "why": "…", "after": [101], "focus": ["src/theme/v1.ts"] }
+        { "number": 101, "why": "One line on what this PR does and why.", "confidence": "high" },
+        {
+          "number": 102,
+          "why": "…",
+          "after": [101],
+          "focus": ["src/theme/v1.ts"],
+          "confidence": "medium",
+          "risk": "Safe only if nothing reaches generateSyntax dynamically."
+        }
       ]
     }
   ]
@@ -88,6 +95,11 @@ With the mouse, drag across line numbers to select a range and click **Comment**
 
 - `after`: PRs this one stacks on. They're shown as hints next to the PR, along with their verdicts.
 - `focus`: files to review first. They're listed first and highlighted.
+- `confidence`: `"high"`, `"medium"`, or `"low"`: how sure the author is. Shown as a three-bar meter in the rail, the PR bar, and the summary.
+- `risk`: one line on what could go wrong, shown under the PR's description and next to approvals in the summary.
+- An item may use `"ref": "base..head"` instead of `number` for local work.
+
+docket computes each item's size from its diff: **S** is at most 50 changed lines and 3 files, **L** is more than 400 lines or 15 files, and **M** is everything between.
 
 ## verdicts.json
 
@@ -99,6 +111,8 @@ With the mouse, drag across line numbers to select a range and click **Comment**
     {
       "number": 102,
       "title": "refactor(theme): remove v1 syntax generation",
+      "confidence": "medium",
+      "size": "L",
       "verdict": "reject",
       "reason": "Depends on #101 landing first",
       "notes": [
@@ -111,6 +125,6 @@ With the mouse, drag across line numbers to select a range and click **Comment**
 }
 ```
 
-Every item in the session appears, in order. Pull requests have `number`; local refs have `ref` instead. `verdict` is `"approve"`, `"reject"`, `"skip"`, or `null` if the item was not reviewed. A note without `path` is about the whole PR. Line notes follow GitHub's review comment convention: `RIGHT` uses the head's line numbers (added and context lines), `LEFT` uses the base's (deleted lines), and `startLine` is present only for multi-line ranges.
+Every item in the session appears, in order. Pull requests have `number`; local refs have `ref` instead. `confidence` is copied from the manifest when present; `size` is docket's S/M/L. `verdict` is `"approve"`, `"reject"`, `"skip"`, or `null` if the item was not reviewed. A note without `path` is about the whole PR. Line notes follow GitHub's review comment convention: `RIGHT` uses the head's line numbers (added and context lines), `LEFT` uses the base's (deleted lines), and `startLine` is present only for multi-line ranges.
 
 State files written by older versions (with `prNote`) are migrated on load.

@@ -1,38 +1,161 @@
 {
   "title": "packages/tui dead-code cleanup",
-  "repo": { "path": "/Users/kit/code/open-source/opencode", "github": "anomalyco/opencode", "base": "v2" },
+  "repo": {
+    "path": "/Users/kit/code/open-source/opencode",
+    "github": "anomalyco/opencode",
+    "base": "v2"
+  },
   "summary": "19 small dead-code and dedup PRs from an in-depth scan of packages/tui. Each re-verified on v2, typechecked, and passed `bun run check`.",
   "groups": [
-    { "title": "package.json exports", "why": "A stale export pointing at a deleted file, then 28 exports nothing imports (package is private).", "prs": [
-      { "number": 52985, "why": "./terminal-win32 points at a file deleted in #43604; node-ffi.d.ts lost its only user in the same commit." },
-      { "number": 52988, "after": [52985], "why": "Trims 28 export entries with zero consumers; keeps the 14 used by cli." }
-    ]},
-    { "title": "Theme", "why": "V1 theme leftovers after the V2 theme engine landed.", "prs": [
-      { "number": 52986, "why": "Re-exports nobody imports through context/theme and theme/index." },
-      { "number": 52987, "after": [52986], "why": "~500 lines of V1 syntax generation; production uses the V2 generateSyntax.", "focus": ["packages/tui/src/theme/v1.ts"] },
-      { "number": 52992, "after": [52986], "why": "addTheme/upsertTheme and an always-empty pluginThemes store; the V2 plugin API can't install themes." }
-    ]},
-    { "title": "Config & context", "why": "Unused v1 config aliases and fields nobody has ever read.", "prs": [
-      { "number": 52990, "why": "TuiConfig alias, v1 Descriptions, and two Keybinds = { parse } value objects." },
-      { "number": 52991, "why": "multiplexer/displayServer are written but never read anywhere in git history." }
-    ]},
-    { "title": "Components", "why": "Props and options no caller passes, plus one dedup.", "prs": [
-      { "number": 52993, "why": "Prompt hint/right/showPlaceholder; their last caller was the V1 prompt plugin slot." },
-      { "number": 52994, "why": "DialogSelect detailsColor/detailsWrap/categoryView are never set (titleWidth kept: it is set via shorthand)." },
-      { "number": 52995, "why": "TabPulse outerFlashTail has never been passed." },
-      { "number": 52996, "why": "Identical clamp in tab-pulse and fade-in-text; share it like coast/smootherstep." }
-    ]},
-    { "title": "mini", "why": "The opencode mini frontend: unused helper, impossible branch, test-only option, one dedup.", "prs": [
-      { "number": 52997, "why": "monoTruncateMiddle has no callers since fac875dba0." },
-      { "number": 52998, "why": "runMiniFrontend always returned exitCode 0, so the CLI's process.exit branch was unreachable.", "focus": ["packages/cli/src/mini.ts"] },
-      { "number": 52999, "why": "The thinking override is only passed by tests; the CLI stopped in 925c2423de." },
-      { "number": 53000, "why": "Byte-identical requestOptions in two files; share it." }
-    ]},
-    { "title": "Routes & plugins", "why": "Never-passed props, a hook nothing sets, a command that can never run, one dedup.", "prs": [
-      { "number": 53001, "why": "Sidebar overlay, PluginsDialog server, DiffViewerContent navigation, InlineTool iconColor/failure." },
-      { "number": 53002, "why": "ComposerTab.onClose has had no setter since cb863b8ea5; plus an unused re-export." },
-      { "number": 53003, "why": "session.unshare is hard-coded enabled: false; keybind entries kept so user configs still validate." },
-      { "number": 53004, "why": "Identical A/D/M statusLabel in two files; share one named helper." }
-    ]}
+    {
+      "title": "package.json exports",
+      "why": "A stale export pointing at a deleted file, then 28 exports nothing imports (package is private).",
+      "prs": [
+        {
+          "number": 52985,
+          "why": "./terminal-win32 points at a file deleted in #43604; node-ffi.d.ts lost its only user in the same commit.",
+          "confidence": "high"
+        },
+        {
+          "number": 52988,
+          "after": [
+            52985
+          ],
+          "why": "Trims 28 export entries with zero consumers; keeps the 14 used by cli.",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "title": "Theme",
+      "why": "V1 theme leftovers after the V2 theme engine landed.",
+      "prs": [
+        {
+          "number": 52986,
+          "why": "Re-exports nobody imports through context/theme and theme/index.",
+          "confidence": "high"
+        },
+        {
+          "number": 52987,
+          "after": [
+            52986
+          ],
+          "why": "~500 lines of V1 syntax generation; production uses the V2 generateSyntax.",
+          "focus": [
+            "packages/tui/src/theme/v1.ts"
+          ],
+          "confidence": "medium",
+          "risk": "~500 lines; safe only if nothing reaches V1 generateSyntax dynamically (none found)"
+        },
+        {
+          "number": 52992,
+          "after": [
+            52986
+          ],
+          "why": "addTheme/upsertTheme and an always-empty pluginThemes store; the V2 plugin API can't install themes.",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "title": "Config & context",
+      "why": "Unused v1 config aliases and fields nobody has ever read.",
+      "prs": [
+        {
+          "number": 52990,
+          "why": "TuiConfig alias, v1 Descriptions, and two Keybinds = { parse } value objects.",
+          "confidence": "high"
+        },
+        {
+          "number": 52991,
+          "why": "multiplexer/displayServer are written but never read anywhere in git history.",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "title": "Components",
+      "why": "Props and options no caller passes, plus one dedup.",
+      "prs": [
+        {
+          "number": 52993,
+          "why": "Prompt hint/right/showPlaceholder; their last caller was the V1 prompt plugin slot.",
+          "confidence": "high"
+        },
+        {
+          "number": 52994,
+          "why": "DialogSelect detailsColor/detailsWrap/categoryView are never set (titleWidth kept: it is set via shorthand).",
+          "confidence": "high",
+          "risk": "plugin dialogs spread options into DialogSelect; the plugin type can't carry these fields"
+        },
+        {
+          "number": 52995,
+          "why": "TabPulse outerFlashTail has never been passed.",
+          "confidence": "high"
+        },
+        {
+          "number": 52996,
+          "why": "Identical clamp in tab-pulse and fade-in-text; share it like coast/smootherstep.",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "title": "mini",
+      "why": "The opencode mini frontend: unused helper, impossible branch, test-only option, one dedup.",
+      "prs": [
+        {
+          "number": 52997,
+          "why": "monoTruncateMiddle has no callers since fac875dba0.",
+          "confidence": "high"
+        },
+        {
+          "number": 52998,
+          "why": "runMiniFrontend always returned exitCode 0, so the CLI's process.exit branch was unreachable.",
+          "focus": [
+            "packages/cli/src/mini.ts"
+          ],
+          "confidence": "high"
+        },
+        {
+          "number": 52999,
+          "why": "The thinking override is only passed by tests; the CLI stopped in 925c2423de.",
+          "confidence": "medium",
+          "risk": "edits four test call sites; relies on none of them rendering reasoning"
+        },
+        {
+          "number": 53000,
+          "why": "Byte-identical requestOptions in two files; share it.",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "title": "Routes & plugins",
+      "why": "Never-passed props, a hook nothing sets, a command that can never run, one dedup.",
+      "prs": [
+        {
+          "number": 53001,
+          "why": "Sidebar overlay, PluginsDialog server, DiffViewerContent navigation, InlineTool iconColor/failure.",
+          "confidence": "medium",
+          "risk": "five components in one PR; PluginsDialog's resource guard was simplified after removing server"
+        },
+        {
+          "number": 53002,
+          "why": "ComposerTab.onClose has had no setter since cb863b8ea5; plus an unused re-export.",
+          "confidence": "high"
+        },
+        {
+          "number": 53003,
+          "why": "session.unshare is hard-coded enabled: false; keybind entries kept so user configs still validate.",
+          "confidence": "high"
+        },
+        {
+          "number": 53004,
+          "why": "Identical A/D/M statusLabel in two files; share one named helper.",
+          "confidence": "high"
+        }
+      ]
+    }
   ]
 }

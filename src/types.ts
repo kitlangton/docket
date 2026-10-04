@@ -6,6 +6,22 @@ export type ManifestItem = {
   why?: string
   after?: number[]
   focus?: string[]
+  /** How sure the author is that the change is right. */
+  confidence?: Confidence
+  /** One line on what could go wrong. */
+  risk?: string
+}
+
+export type Confidence = "high" | "medium" | "low"
+
+export type Size = "S" | "M" | "L"
+
+/** S: at most 50 changed lines and 3 files. L: more than 400 lines or 15 files. M: everything between. */
+export function sizeOf(meta: { additions: number; deletions: number; changedFiles: number }): Size {
+  const lines = meta.additions + meta.deletions
+  if (lines <= 50 && meta.changedFiles <= 3) return "S"
+  if (lines > 400 || meta.changedFiles > 15) return "L"
+  return "M"
 }
 
 export type ManifestGroup = {
@@ -97,6 +113,8 @@ export type VerdictsFile = {
     number?: number
     ref?: string
     title?: string
+    confidence?: Confidence
+    size?: Size
     verdict: Verdict | null
     reason?: string
     notes: VerdictNote[]

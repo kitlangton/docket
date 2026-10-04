@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import {
+  sizeOf,
+  type Confidence,
   itemId,
   itemLabel,
   type ItemLoad,
@@ -25,6 +27,55 @@ export function Glyph(props: { verdict: Verdict | null | undefined; stamp?: bool
       {props.verdict === "skip" ? <path d="M4 7h6M7.6 4.6L10 7l-2.4 2.4" /> : null}
       {!props.verdict ? <circle cx="7" cy="7" r="3.6" /> : null}
     </svg>
+  )
+}
+
+const CONFIDENCE_LABEL: Record<Confidence, string> = { high: "High", medium: "Medium", low: "Low" }
+const CONFIDENCE_BARS: Record<Confidence, number> = { high: 3, medium: 2, low: 1 }
+
+/** Three ascending bars, filled to the agent's confidence; deliberately unlike the round verdict glyphs. */
+export function ConfidenceMeter(props: { confidence: Confidence }) {
+  const filled = CONFIDENCE_BARS[props.confidence]
+  return (
+    <svg
+      className={`meter-bars is-${props.confidence}`}
+      width="11"
+      height="10"
+      viewBox="0 0 11 10"
+      aria-label={`${CONFIDENCE_LABEL[props.confidence]} confidence`}
+    >
+      {[0, 1, 2].map((index) => (
+        <rect
+          key={index}
+          x={index * 4}
+          y={6 - index * 3}
+          width="3"
+          height={4 + index * 3}
+          rx="0.8"
+          className={index < filled ? "on" : undefined}
+        />
+      ))}
+    </svg>
+  )
+}
+
+/** "High · S": the agent's confidence and docket's computed size, either of which may be missing. */
+export function Assessment(props: { confidence?: Confidence; load: ItemLoad | undefined; compact?: boolean }) {
+  const size = props.load?.ok ? sizeOf(props.load.data.meta) : undefined
+  if (!props.confidence && !size) return null
+  return (
+    <span
+      className="assessment"
+      title={props.confidence ? `${CONFIDENCE_LABEL[props.confidence]} confidence${size ? ` · size ${size}` : ""}` : `Size ${size}`}
+    >
+      {props.confidence ? (
+        <span className={`assessment-confidence is-${props.confidence}`}>
+          <ConfidenceMeter confidence={props.confidence} />
+          {props.compact ? null : CONFIDENCE_LABEL[props.confidence]}
+        </span>
+      ) : null}
+      {size ? <span className="assessment-size">{size}</span> : null}
+    </span>
   )
 }
 
@@ -106,6 +157,8 @@ export function Rail(props: {
                   <Glyph verdict={review?.verdict} stamp={props.stamped === id} />
                   <span className="rail-pr-title">{title ?? <Skeleton width="70%" />}</span>
                   {notes ? <span className="rail-notes tabular">{notes}</span> : null}
+                  {pr.confidence ? <ConfidenceMeter confidence={pr.confidence} /> : null}
+                  {load?.ok ? <span className="rail-size">{sizeOf(load.data.meta)}</span> : null}
                   <span className="rail-num tabular">{pr.number ?? ""}</span>
                 </button>
               )
@@ -124,10 +177,10 @@ export function PrHeader(props: {
   state: ReviewState
   viewed: { done: number; total: number } | null
   condensed: boolean
-  badges?: ReactNode
   children?: ReactNode
 }) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
+  const risk = props.entry.pr.risk
   const title = meta ? displayTitle(meta.title) : null
   const label = itemLabel(props.entry.pr)
   const counts = meta ? (
@@ -150,12 +203,12 @@ export function PrHeader(props: {
     <>
       <div className={`pr-sticky${props.condensed ? " is-on" : ""}`} aria-hidden={!props.condensed}>
         <span className="pr-num">{label}</span>
-        <span className="pr-sticky-text" title={[title, props.entry.pr.why].filter(Boolean).join("\n\n")}>
+        <span className="pr-sticky-text" title={[title, props.entry.pr.why, risk && `Risk: ${risk}`].filter(Boolean).join("\n\n")}>
           <span className="pr-sticky-title">{title}</span>
           {props.entry.pr.why ? <span className="pr-sticky-why">{props.entry.pr.why}</span> : null}
         </span>
         {props.review?.verdict ? <Glyph verdict={props.review.verdict} /> : null}
-        {props.badges}
+        <Assessment confidence={props.entry.pr.confidence} load={props.load} compact />
         {counts}
       </div>
       <header className="pr-bar">
@@ -168,9 +221,15 @@ export function PrHeader(props: {
               {VERDICT_LABEL[props.review.verdict]}
             </span>
           ) : null}
-          {props.badges}
+          <Assessment confidence={props.entry.pr.confidence} load={props.load} />
         </div>
         {props.entry.pr.why ? <p className="pr-why">{props.entry.pr.why}</p> : null}
+        {risk ? (
+          <p className="pr-risk">
+            <span>Risk</span>
+            {risk}
+          </p>
+        ) : null}
         {props.review?.reason ? (
           <p className="pr-reason">
             <span>Rejected</span>
@@ -478,8 +537,18 @@ export function Summary(props: {
                     <div className="ledger-head">
                       <Glyph verdict={review?.verdict} />
                       <span className="ledger-title">{load?.ok ? displayTitle(load.data.meta.title) : itemLabel(pr)}</span>
+                      <span className="ledger-confidence">
+                        {pr.confidence ? (
+                          <span className={`assessment-confidence is-${pr.confidence}`}>
+                            <ConfidenceMeter confidence={pr.confidence} />
+                            {CONFIDENCE_LABEL[pr.confidence]}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="ledger-size">{load?.ok ? sizeOf(load.data.meta) : ""}</span>
                       <span className="rail-num tabular">{itemLabel(pr)}</span>
                     </div>
+                    {pr.risk && review?.verdict === "approve" ? <LedgerLine tag="Risk">{pr.risk}</LedgerLine> : null}
                     {review?.reason ? (
                       <LedgerLine tag="Reason" tone="reject">
                         {review.reason}
