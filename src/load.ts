@@ -104,12 +104,12 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
   const base = baseSpec || "HEAD"
   const head = headSpec || "HEAD"
   const [headOid, mb] = await Promise.all([revParse(manifest, head), mergeBase(manifest, base, head)])
-  const [[patch, patchIgnoreWhitespace], branch, subject, commits, numstat] = await Promise.all([
+  const [[patch, patchIgnoreWhitespace], branch, message, commits, numstat] = await Promise.all([
     diffPair(manifest, mb, headOid),
     run([...git(manifest), "rev-parse", "--abbrev-ref", head])
       .then((out) => out.trim())
       .catch(() => ""),
-    run([...git(manifest), "log", "-1", "--format=%s", headOid]).then((out) => out.trim()),
+    run([...git(manifest), "log", "-1", "--format=%s%x00%b", headOid]).catch(() => ""),
     run([...git(manifest), "rev-list", "--count", `${mb}..${headOid}`]).then((out) => Number(out.trim())),
     run([...git(manifest), "diff", "--numstat", "-M", mb, headOid]),
   ])
@@ -120,11 +120,14 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
     .filter(Boolean)
     .map((line) => line.split("\t").map(Number))
   const isBranch = branch && branch !== "HEAD" && !/^[0-9a-f]{7,40}$/.test(head)
+  const [subject = "", body = ""] = message.split("\0").map((part) => part.trim())
   const meta: ItemMeta = {
     id: itemId(item),
     ref: spec,
-    title: isBranch ? branch : subject,
-    body: "",
+    // The head commit's subject; the ref itself only when there is none.
+    title: subject || spec,
+    titleIsRef: !subject,
+    body,
     headRefName: isBranch ? branch : head,
     headRefOid: headOid,
     baseRefName: base,

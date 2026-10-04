@@ -126,10 +126,19 @@ export function countVerdicts(order: string[], state: ReviewState) {
   return { approve: count("approve"), reject: count("reject"), skip: count("skip"), unreviewed: count(null) }
 }
 
-/** Strips a conventional-commit prefix like `refactor(tui): ` and capitalizes the rest. */
+/** Strips a conventional-commit prefix like `refactor(tui): ` and capitalizes what follows it; other titles are untouched. */
 export function displayTitle(title: string) {
-  const stripped = title.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, "")
-  return stripped.charAt(0).toUpperCase() + stripped.slice(1)
+  const prefix = title.match(/^[a-z]+(\([^)]*\))?!?:\s*/)
+  if (!prefix) return title
+  const rest = title.slice(prefix[0].length)
+  return rest.charAt(0).toUpperCase() + rest.slice(1)
+}
+
+/** Shortens long labels like `base..head` in the middle, keeping both ends readable. */
+export function middleTruncate(text: string, max = 22) {
+  if (text.length <= max) return text
+  const keep = Math.floor((max - 1) / 2)
+  return `${text.slice(0, keep)}…${text.slice(-keep)}`
 }
 
 function range(length: number) {

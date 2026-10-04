@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   sizeOf,
   type Confidence,
@@ -12,7 +12,8 @@ import {
   type ReviewState,
   type Verdict,
 } from "../src/types"
-import { countVerdicts, displayTitle, fuzzyScore, noteCount, noteLocation, type Entry } from "./model"
+import { ClampedMarkdown, Markdown, markdownSummary } from "./markdown"
+import { countVerdicts, displayTitle, fuzzyScore, middleTruncate, noteCount, noteLocation, type Entry } from "./model"
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
 const STATE_LABEL = { OPEN: "Open", MERGED: "Merged", CLOSED: "Closed", LOCAL: "Local" }
@@ -145,7 +146,7 @@ export function Rail(props: {
               const load = props.items[id]
               const review = props.state.reviews[id]
               const notes = noteCount(review)
-              const title = load?.ok ? displayTitle(load.data.meta.title) : load ? "Failed to load" : null
+              const title = load?.ok ? itemTitle(load.data.meta) : load ? "Failed to load" : null
               return (
                 <button
                   key={id}
@@ -184,16 +185,20 @@ export function PrHeader(props: {
 }) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
   const pr = props.entry.pr
-  const title = meta ? displayTitle(meta.title) : null
+  const title = meta ? itemTitle(meta) : null
+  const body = meta?.body.trim() ?? ""
+  const summary = useMemo(() => markdownSummary(pr.why || body), [pr.why, body])
+  const label = itemLabel(pr)
   const details = (
     <>
-      {pr.why ? <p className="pr-why">{pr.why}</p> : null}
+      {pr.why ? <Markdown source={pr.why} className="pr-why" /> : null}
       {pr.risk ? (
-        <p className="pr-risk">
+        <div className="pr-risk">
           <span>Risk</span>
-          {pr.risk}
-        </p>
+          <Markdown source={pr.risk} />
+        </div>
       ) : null}
+      {body ? <ClampedMarkdown source={body} className="pr-body" /> : null}
       {props.review?.reason ? (
         <p className="pr-risk is-reject">
           <span>Rejected</span>
@@ -215,23 +220,27 @@ export function PrHeader(props: {
   return (
     <header className={`pr-band${props.expanded ? " is-expanded" : ""}`}>
       <div className="pr-line">
-        <span className="pr-num">{itemLabel(pr)}</span>
+        <span className="pr-num" title={label.length > 22 ? label : undefined}>
+          {middleTruncate(label)}
+        </span>
         <span className="pr-text">
-          <span className="pr-title">{title ?? <Skeleton width={360} height={12} />}</span>
+          <span className={`pr-title${meta?.titleIsRef ? " is-ref" : ""}`} title={title ?? undefined}>
+            {title ?? <Skeleton width={360} height={12} />}
+          </span>
           {props.review?.verdict ? (
             <span className={`verdict-chip is-${props.review.verdict}`}>
               <Glyph verdict={props.review.verdict} />
               {VERDICT_LABEL[props.review.verdict]}
             </span>
           ) : null}
-          {pr.why && !props.expanded ? <span className="pr-desc">{pr.why}</span> : null}
+          {summary && !props.expanded ? <span className="pr-desc">{summary}</span> : null}
           {pr.risk && !props.expanded ? <span className="pr-risk-mark">Risk</span> : null}
           {props.expanded ? null : <div className="pr-popover">{details}</div>}
         </span>
         <Assessment confidence={pr.confidence} load={props.load} compact />
         {meta ? (
           <span className="pr-counts tabular">
-            {meta.commits ? <span>{`${meta.commits} commit${meta.commits === 1 ? "" : "s"}`}</span> : null}
+            {meta.commits && meta.commits > 1 ? <span>{meta.commits} commits</span> : null}
             <span>{`${meta.changedFiles} file${meta.changedFiles === 1 ? "" : "s"}`}</span>
             {meta.additions ? <span className="add">+{meta.additions}</span> : null}
             {meta.deletions ? <span className="del">−{meta.deletions}</span> : null}
@@ -258,6 +267,12 @@ export function PrHeader(props: {
       </div>
     </header>
   )
+}
+
+/** A PR or commit title for display: conventional prefixes are tidied, git refs are left exactly as they are. */
+function itemTitle(meta: { title: string; titleIsRef?: boolean }) {
+  if (meta.titleIsRef) return meta.title
+  return displayTitle(meta.title)
 }
 
 export function PrNotes(props: { notes: Note[]; focus: number | null; onEdit: (note: Note) => void; onDelete: (id: string) => void }) {
@@ -538,7 +553,7 @@ export function Summary(props: {
                   <div key={id} className={`ledger-row${id === selectedId ? " is-selected" : ""}`} onClick={() => props.onOpen(id)}>
                     <div className="ledger-head">
                       <Glyph verdict={review?.verdict} />
-                      <span className="ledger-title">{load?.ok ? displayTitle(load.data.meta.title) : itemLabel(pr)}</span>
+                      <span className="ledger-title">{load?.ok ? itemTitle(load.data.meta) : itemLabel(pr)}</span>
                       <span className="ledger-confidence">
                         {pr.confidence ? (
                           <span className={`assessment-confidence is-${pr.confidence}`}>

@@ -44,6 +44,8 @@ export type ItemMeta = {
   number?: number
   ref?: string
   title: string
+  /** True when `title` is a git ref, which must be shown verbatim. */
+  titleIsRef?: boolean
   body: string
   headRefName: string
   headRefOid: string
