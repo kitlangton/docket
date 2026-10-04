@@ -1213,6 +1213,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
               <VerdictPrompt
                 label={itemLabel(entry.pr)}
                 verdict={review?.verdict}
+                stale={isUpdated(current)}
                 onDecide={(verdict) => (verdict === "reject" ? setPrompt({ kind: "reject" }) : decide(verdict))}
               />
             ) : (

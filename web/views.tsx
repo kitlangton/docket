@@ -324,7 +324,28 @@ export function PrNotes(props: { notes: Note[]; focus: number | null; onEdit: (n
 }
 
 /** Closes a PR: where the eye lands after the last hunk, with the verdict keys right there. */
-export function VerdictPrompt(props: { label: string; verdict: Verdict | null | undefined; onDecide: (verdict: Verdict) => void }) {
+export function VerdictPrompt(props: {
+  label: string
+  verdict: Verdict | null | undefined
+  /** New commits since the verdict: it stands until re-confirmed. */
+  stale: boolean
+  onDecide: (verdict: Verdict) => void
+}) {
+  if (props.verdict && props.stale) {
+    return (
+      <div className={`verdict-prompt is-decided is-stale is-${props.verdict}`}>
+        <Glyph verdict={props.verdict} stale />
+        <span>
+          {VERDICT_LABEL[props.verdict]} {props.label}
+        </span>
+        <span className="pr-updated">updated</span>
+        <span className="spacer" />
+        <VerdictButton verdict="approve" k="a" label="Approve" onDecide={props.onDecide} />
+        <VerdictButton verdict="reject" k="r" label="Reject" onDecide={props.onDecide} />
+        <VerdictButton verdict="skip" k="s" label="Skip" onDecide={props.onDecide} />
+      </div>
+    )
+  }
   if (props.verdict) {
     return (
       <div className={`verdict-prompt is-decided is-${props.verdict}`}>
