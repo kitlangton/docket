@@ -48,7 +48,8 @@ async function fromManifest(path: string, args: SessionArgs): Promise<Session> {
   const file = Bun.file(path)
   if (!(await file.exists())) throw new Error(`session file not found: ${path}`)
   const manifest: Manifest = await file.json()
-  const repoPath = await repoRoot(args.repo ?? manifest.repo.path)
+  // A relative repo path is relative to the manifest, so manifests can live next to the code they describe.
+  const repoPath = await repoRoot(args.repo ?? resolve(dirname(path), manifest.repo.path))
   const github = manifest.repo.github ?? (await originRepo(repoPath))
   return {
     id: `${slug([basename(path, ".json")])}-${Bun.hash(path).toString(36).slice(0, 6)}`,
@@ -119,7 +120,7 @@ function adhocKey(args: SessionArgs) {
   )
 }
 
-function slug(parts: string[]) {
+export function slug(parts: string[]) {
   const text = parts
     .join("-")
     .toLowerCase()
