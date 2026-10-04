@@ -36,29 +36,31 @@ Progress is saved continuously, so a reload or restart resumes where you were. A
 
 ## Keys
 
-| Key                 | Action                                     |
-| ------------------- | ------------------------------------------ |
-| `j` / `k`           | Next / previous change; `k` from the first change returns to the PR header |
-| `Ctrl-n` / `Ctrl-p` | Next / previous line                       |
-| `]` / `[`           | Next / previous file                       |
-| `J` / `K`           | Next / previous PR                         |
-| `gg` / `G`          | Top / bottom of the PR                     |
-| `Ctrl-d` / `Ctrl-u` | Half page down / up                        |
-| `a`                 | Approve and advance                        |
-| `r`                 | Reject with an optional reason, and advance |
-| `s`                 | Skip and advance                           |
-| `u`                 | Clear the verdict                          |
-| `n`                 | Note on the cursor line (edits an existing note there); a PR-level note when on the header |
-| `N`                 | PR-level note                              |
-| `o`                 | Fold / unfold the file under the cursor (deleted files start folded) |
-| `v`                 | Toggle split / unified                     |
-| `z`                 | Toggle ignoring whitespace                 |
-| `O`                 | Open the PR on GitHub                      |
-| `Enter` or `:`      | Summary (`Enter` unfolds a folded file first) |
-| `w`                 | Hand back: write `verdicts.json` and exit (on the summary screen) |
-| `?`                 | Help                                       |
+| Key                 | Action                                                                |
+| ------------------- | --------------------------------------------------------------------- |
+| `j` / `k`           | Next / previous change; `k` from the first change returns to the header |
+| `Ctrl-n` / `Ctrl-p` | Next / previous line                                                  |
+| `]` / `[`           | Next / previous file                                                  |
+| `J` / `K`           | Next / previous item                                                  |
+| `gg` / `G`          | Top / bottom of the item                                              |
+| `Ctrl-d` / `Ctrl-u` | Half page down / up                                                   |
+| `a`                 | Approve and advance                                                   |
+| `r`                 | Reject with an optional reason, and advance                           |
+| `s`                 | Skip and advance                                                      |
+| `u`                 | Clear the verdict                                                     |
+| `n` / `N`           | Note on the whole PR                                                  |
+| `V` / `v`           | Select lines (visual mode): `j`/`k` extend, `n` or `Enter` comments, `Esc` exits |
+| `o`                 | Fold / unfold the file under the cursor (deleted files start folded)  |
+| `t`                 | Toggle split / unified                                                |
+| `z`                 | Toggle ignoring whitespace                                            |
+| `O`                 | Open on GitHub                                                        |
+| `Enter` or `:`      | Summary (`Enter` unfolds a folded file first)                         |
+| `w`                 | Hand back: write `verdicts.json` and exit (on the summary screen)     |
+| `?`                 | Help                                                                  |
 
-In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels. Saving an empty note deletes it. The mouse works too: click a line to move the cursor there, hover the cursor line's number and click `+` to add a note, click a file header to fold it, and click a note to edit it.
+PR notes are listed under the header. From the header, `j`/`k` step through them; `e` (or `Enter`) edits the focused note, `d` deletes it, and `Esc` leaves. In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels; saving an empty note deletes it.
+
+With the mouse, drag across line numbers to select a range and click **Comment**, click a line to move the cursor there, click a file header to fold it, and click any note to edit it.
 
 ## Session manifest
 
@@ -92,13 +94,19 @@ In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` canc
   "prs": [
     {
       "number": 102,
+      "title": "refactor(theme): remove v1 syntax generation",
       "verdict": "reject",
       "reason": "Depends on #101 landing first",
-      "notes": [{ "path": "src/theme/v1.ts", "side": "LEFT", "line": 74, "body": "Still referenced?" }],
-      "prNote": "Optional PR-level note"
+      "notes": [
+        { "body": "Is generateSyntax covered by tests?" },
+        { "path": "src/theme/v1.ts", "side": "LEFT", "line": 74, "body": "Still referenced?" },
+        { "path": "src/theme/v1.ts", "side": "RIGHT", "startLine": 10, "line": 14, "body": "This block can go" }
+      ]
     }
   ]
 }
 ```
 
-`verdict` is `"approve"`, `"reject"`, `"skip"`, or `null` if the PR was not reviewed. Every PR in the manifest appears, in manifest order. A note's `side` and `line` use GitHub's review comment convention: `RIGHT` uses the PR head's line numbers (added and context lines), and `LEFT` uses the base's (deleted lines).
+Every item in the session appears, in order. Pull requests have `number`; local refs have `ref` instead. `verdict` is `"approve"`, `"reject"`, `"skip"`, or `null` if the item was not reviewed. A note without `path` is about the whole PR. Line notes follow GitHub's review comment convention: `RIGHT` uses the head's line numbers (added and context lines), `LEFT` uses the base's (deleted lines), and `startLine` is present only for multi-line ranges.
+
+State files written by older versions (with `prNote`) are migrated on load.

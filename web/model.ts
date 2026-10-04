@@ -56,6 +56,30 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
   return { files, focus, rows, blocks }
 }
 
+/**
+ * Where a note on rows `a..b` attaches: the side of the last selected row, spanning that side's
+ * lines in the selection. GitHub review comments use the same single-side ranges.
+ */
+export function rangeAnchor(rows: Row[], a: number, b: number) {
+  const [from, to] = a <= b ? [a, b] : [b, a]
+  const selected = rows.slice(from, to + 1)
+  const last = selected.at(-1)!
+  const first = selected[0]!
+  const startLine = Math.min(...selected.filter((row) => row.side === last.side).map((row) => row.line))
+  return {
+    side: last.side,
+    line: last.line,
+    startLine: startLine < last.line ? startLine : undefined,
+    selection: { start: first.line, side: first.side, end: last.line, endSide: last.side } satisfies SelectedLineRange,
+  }
+}
+
+export function noteLocation(note: { path?: string; startLine?: number; line?: number }) {
+  if (!note.path) return ""
+  const lines = note.startLine ? `${note.startLine}–${note.line}` : `${note.line}`
+  return `${note.path.split("/").at(-1)}:${lines}`
+}
+
 export function nextUnreviewed(order: string[], state: ReviewState, from: string) {
   const index = order.indexOf(from)
   const rotated = [...order.slice(index + 1), ...order.slice(0, index)]

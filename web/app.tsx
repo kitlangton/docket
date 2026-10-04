@@ -1,9 +1,9 @@
-import { DIFFS_TAG_NAME } from "@pierre/diffs"
+import { DIFFS_TAG_NAME, type SelectedLineRange } from "@pierre/diffs"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note, PrReview, ReviewState, SessionPayload, Side, Verdict } from "../src/types"
 import { FileBlock, type Draft } from "./diff"
-import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, type PrModel, type Row } from "./model"
-import { Help, PrHeader, Prompt, Rail, StatusBar, Summary } from "./views"
+import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
+import { Help, PrHeader, PrNotes, Prompt, Rail, StatusBar, Summary } from "./views"
 
 export function App() {
   const [session, setSession] = useState<SessionPayload>()
@@ -20,14 +20,11 @@ export function App() {
       .then((value: ReviewState) => setState(value))
     const seen = { version: -1 }
     const timer = setInterval(async () => {
-      const status: { version: number; progress: SessionPayload["progress"] } = await fetch("/api/version").then((res) =>
-        res.json(),
-      )
-      if (status.version !== seen.version) {
-        seen.version = status.version
-        load()
-      }
-    }, 1000)
+      const status: { version: number } = await fetch("/api/version").then((res) => res.json())
+      if (status.version === seen.version) return
+      seen.version = status.version
+      load()
+    }, 700)
     return () => clearInterval(timer)
   }, [])
 
@@ -47,15 +44,16 @@ function Loading(props: { session: SessionPayload }) {
           <span style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }} />
         </div>
         <div className="muted">
-          {progress.phase} · {progress.done}/{progress.total} PRs
+          {progress.phase} · {progress.done}/{progress.total}
         </div>
       </div>
     </div>
   )
 }
 
-type PromptKind = "reject" | "prNote"
+type PromptState = { kind: "reject" } | { kind: "note"; noteId?: string; initial: string }
 type ScrollIntent = "top" | "visible" | "none"
+type Visual = { anchor: number; pill?: { x: number; y: number } }
 
 // Cursor position above the first change: the PR header, shown at scroll top.
 const HEADER = -1
@@ -72,12 +70,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const [view, setView] = useState<"deck" | "summary">("deck")
   const [cursors, setCursors] = useState<Record<string, number>>({})
   const [cursorMode, setCursorMode] = useState<"block" | "line">("block")
+  const [visual, setVisual] = useState<Visual | null>(null)
+  const [noteFocus, setNoteFocus] = useState<number | null>(null)
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">(
     () => (localStorage.getItem("docket.diffStyle") === "unified" ? "unified" : "split"),
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [help, setHelp] = useState(false)
-  const [prompt, setPrompt] = useState<PromptKind | null>(null)
+  const [prompt, setPrompt] = useState<PromptState | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [summaryIndex, setSummaryIndex] = useState(0)
   const [handedBack, setHandedBack] = useState<string | null>(null)
@@ -85,6 +85,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const mainRef = useRef<HTMLDivElement>(null)
   const scrollIntent = useRef<ScrollIntent>("top")
   const pendingG = useRef(0)
+  const pointer = useRef({ x: 0, y: 0 })
 
   const models = useMemo(() => {
     const result = new Map<string, PrModel>()
@@ -100,6 +101,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const entry = entries[order.indexOf(current)]!
   const model = models.get(current)
   const review = state.reviews[current]
+  const prNotes = useMemo(() => (review?.notes ?? []).filter((note) => !note.path), [review?.notes])
   const cursorIndex = model?.rows.length ? Math.min(cursors[current] ?? HEADER, model.rows.length - 1) : HEADER
   const cursor: Row | undefined = cursorIndex === HEADER ? undefined : model?.rows[cursorIndex]
   const isCollapsed = (fileIndex: number) => {
@@ -130,6 +132,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     return () => clearTimeout(timer)
   }, [state])
 
+  useEffect(() => {
+    const track = (event: PointerEvent) => {
+      pointer.current = { x: event.clientX, y: event.clientY }
+    }
+    window.addEventListener("pointerup", track, true)
+    return () => window.removeEventListener("pointerup", track, true)
+  }, [])
+
   const updateReview = useCallback((id: string, fn: (review: PrReview) => PrReview) => {
     setState((prev) => ({ ...prev, reviews: { ...prev.reviews, [id]: fn(prev.reviews[id] ?? EMPTY_REVIEW) } }))
   }, [])
@@ -137,6 +147,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const goTo = useCallback((id: string) => {
     scrollIntent.current = "top"
     setDraft(null)
+    setVisual(null)
+    setNoteFocus(null)
     setCursorMode("block")
     setCursors((prev) => ({ ...prev, [id]: HEADER }))
     setState((prev) => ({ ...prev, current: id }))
@@ -146,6 +158,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     (index: number, intent: ScrollIntent, mode: "block" | "line" = "block") => {
       scrollIntent.current = intent
       setCursorMode(mode)
+      setNoteFocus(null)
       setCursors((prev) => ({ ...prev, [current]: index }))
     },
     [current],
@@ -162,14 +175,23 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     goTo(next)
   }
 
-  const openDraft = useCallback(
-    (path: string, side: Side, line: number) => {
+  /** Opens the line-note editor on rows `a..b` of the current PR, reusing a note already anchored there. */
+  const openRangeDraft = useCallback(
+    (a: number, b: number) => {
+      if (!model) return
+      const row = model.rows[Math.max(a, b)]
+      if (!row) return
+      const path = model.files[row.file]!.name
+      const anchor = rangeAnchor(model.rows, a, b)
       const existing = (state.reviews[current]?.notes ?? []).findLast(
-        (note) => note.path === path && note.side === side && note.line === line,
+        (note) => note.path === path && note.side === anchor.side && note.line === anchor.line && note.startLine === anchor.startLine,
       )
-      setDraft({ path, side, line, body: existing?.body ?? "", noteId: existing?.id })
+      setVisual(null)
+      setCursorMode("line")
+      setCursors((prev) => ({ ...prev, [current]: Math.max(a, b) }))
+      setDraft({ path, side: anchor.side, startLine: anchor.startLine, line: anchor.line, body: existing?.body ?? "", noteId: existing?.id })
     },
-    [state.reviews, current],
+    [model, state.reviews, current],
   )
 
   const saveDraft = useCallback(
@@ -179,13 +201,33 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       updateReview(current, (prev) => {
         const others = prev.notes.filter((note) => note.id !== draft.noteId)
         if (!trimmed) return { ...prev, notes: others }
-        const note: Note = { id: draft.noteId ?? crypto.randomUUID(), path: draft.path, side: draft.side, line: draft.line, body: trimmed }
+        const note: Note = {
+          id: draft.noteId ?? crypto.randomUUID(),
+          path: draft.path,
+          side: draft.side,
+          ...(draft.startLine ? { startLine: draft.startLine } : {}),
+          line: draft.line,
+          body: trimmed,
+        }
         const notes = draft.noteId ? prev.notes.map((item) => (item.id === draft.noteId ? note : item)) : [...prev.notes, note]
         return { ...prev, notes }
       })
       setDraft(null)
     },
     [draft, current, updateReview],
+  )
+
+  const savePrNote = (noteId: string | undefined, body: string) => {
+    updateReview(current, (prev) => {
+      if (!body) return { ...prev, notes: prev.notes.filter((note) => note.id !== noteId) }
+      if (noteId) return { ...prev, notes: prev.notes.map((note) => (note.id === noteId ? { ...note, body } : note)) }
+      return { ...prev, notes: [...prev.notes, { id: crypto.randomUUID(), body }] }
+    })
+  }
+
+  const deleteNote = useCallback(
+    (noteId: string) => updateReview(current, (prev) => ({ ...prev, notes: prev.notes.filter((note) => note.id !== noteId) })),
+    [current, updateReview],
   )
 
   const toggleFold = useCallback(
@@ -201,15 +243,35 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
 
   const cancelDraft = useCallback(() => setDraft(null), [])
   const editNote = useCallback((note: Note) => {
-    if (!note.path || !note.side || note.line === undefined) return
-    setDraft({ path: note.path, side: note.side, line: note.line, body: note.body, noteId: note.id })
+    if (!note.path || !note.side || note.line === undefined) return setPrompt({ kind: "note", noteId: note.id, initial: note.body })
+    setDraft({ path: note.path, side: note.side, startLine: note.startLine, line: note.line, body: note.body, noteId: note.id })
   }, [])
+  const rowIndex = useCallback(
+    (file: number, side: Side, line: number) =>
+      model?.rows.findIndex((row) => row.file === file && row.side === side && row.line === line) ?? -1,
+    [model],
+  )
   const clickLine = useCallback(
     (file: number, side: Side, line: number) => {
-      const index = model?.rows.findIndex((row) => row.file === file && row.side === side && row.line === line) ?? -1
-      if (index >= 0) moveCursor(index, "none", "line")
+      const index = rowIndex(file, side, line)
+      if (index < 0) return
+      setVisual(null)
+      moveCursor(index, "none", "line")
     },
-    [model, moveCursor],
+    [rowIndex, moveCursor],
+  )
+  const pickRange = useCallback(
+    (file: number, range: SelectedLineRange, compose: boolean) => {
+      const a = rowIndex(file, range.side ?? "additions", range.start)
+      const b = rowIndex(file, range.endSide ?? range.side ?? "additions", range.end)
+      if (a < 0 || b < 0) return
+      if (compose) return openRangeDraft(a, b)
+      if (a === b) return clickLine(file, range.side ?? "additions", range.start)
+      setCursorMode("line")
+      setCursors((prev) => ({ ...prev, [current]: b }))
+      setVisual({ anchor: a, pill: { ...pointer.current } })
+    },
+    [rowIndex, openRangeDraft, clickLine, current],
   )
 
   const handBack = async () => {
@@ -294,8 +356,75 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     return true
   }
 
-  const deckKey = (key: string) => {
+  // Visual mode: j/k extend by line within the anchor's file; n or Enter opens the range editor.
+  const visualKey = (key: string, anchor: number) => {
+    const rows = model?.rows ?? []
+    const file = rows[anchor]?.file
+    switch (key) {
+      case "j":
+      case "k":
+      case "C-n":
+      case "C-p":
+      case "ArrowDown":
+      case "ArrowUp": {
+        const down = key === "j" || key === "C-n" || key === "ArrowDown"
+        const index = cursorIndex + (down ? 1 : -1)
+        if (rows[index]?.file === file) moveCursor(index, "visible", "line")
+        setVisual({ anchor })
+        return true
+      }
+      case "n":
+      case "N":
+      case "Enter":
+        openRangeDraft(anchor, cursorIndex)
+        return true
+      case "Escape":
+      case "v":
+      case "V":
+        setVisual(null)
+        return true
+      case "?":
+        setHelp(true)
+        return true
+      default:
+        setVisual(null)
+        return deckKey(key)
+    }
+  }
+
+  // On the header, j/k step through the PR notes before reaching the diff.
+  const headerNoteKey = (key: string) => {
+    if (cursorIndex !== HEADER || !prNotes.length) return false
+    const focused = noteFocus === null ? undefined : prNotes[noteFocus]
+    if (key === "j" && (noteFocus ?? -1) < prNotes.length - 1) {
+      setNoteFocus((noteFocus ?? -1) + 1)
+      return true
+    }
+    if (key === "k" && noteFocus !== null) {
+      setNoteFocus(noteFocus === 0 ? null : noteFocus - 1)
+      return true
+    }
+    if (!focused) return false
+    if (key === "e" || key === "Enter") {
+      setPrompt({ kind: "note", noteId: focused.id, initial: focused.body })
+      return true
+    }
+    if (key === "d") {
+      deleteNote(focused.id)
+      setNoteFocus(prNotes.length > 1 ? Math.max(0, noteFocus! - 1) : null)
+      return true
+    }
+    if (key === "Escape") {
+      setNoteFocus(null)
+      return true
+    }
+    return false
+  }
+
+  const deckKey = (key: string): boolean => {
     if (help) return closeHelp(key)
+    if (visual) return visualKey(key, visual.anchor)
+    if (headerNoteKey(key)) return true
     const rows = model?.rows ?? []
     const blocks = navBlocks
     const half = (mainRef.current?.clientHeight ?? 600) / 2
@@ -310,7 +439,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       case "k": {
         const block = key === "j" ? blocks.find((b) => b.first > cursorIndex) : blocks.findLast((b) => b.first < cursorIndex)
         if (block) moveCursor(block.first, "top")
-        if (!block && key === "k") moveCursor(HEADER, "top")
+        if (!block && key === "k") {
+          moveCursor(HEADER, "top")
+          if (cursorIndex !== HEADER && prNotes.length) setNoteFocus(prNotes.length - 1)
+        }
         return true
       }
       case "C-n":
@@ -362,23 +494,25 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         decide("skip")
         return true
       case "r":
-        setPrompt("reject")
+        setPrompt({ kind: "reject" })
         return true
       case "u":
         updateReview(current, (prev) => ({ ...prev, verdict: null, reason: undefined }))
         return true
       case "n":
-        if (!cursor || !model) {
-          setPrompt("prNote")
-          return true
-        }
-        if (isCollapsed(cursor.file)) toggleFold(model.files[cursor.file]!.name)
-        openDraft(model.files[cursor.file]!.name, cursor.side, cursor.line)
-        return true
       case "N":
-        setPrompt("prNote")
+        setPrompt({ kind: "note", initial: "" })
         return true
-      case "v": {
+      case "v":
+      case "V": {
+        const start = cursor ? cursorIndex : (blocks[0]?.first ?? 0)
+        if (!rows[start]) return true
+        if (isCollapsed(rows[start]!.file)) toggleFold(model!.files[rows[start]!.file]!.name)
+        moveCursor(start, cursor ? "none" : "top", "line")
+        setVisual({ anchor: start })
+        return true
+      }
+      case "t": {
         const next = diffStyle === "split" ? "unified" : "split"
         localStorage.setItem("docket.diffStyle", next)
         scrollIntent.current = "top"
@@ -394,8 +528,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         if (cursor && model) toggleFold(model.files[cursor.file]!.name)
         return true
       case "O": {
-        const load = session.items[current]
-        if (load?.ok) window.open(load.data.meta.url, "_blank")
+        const url = session.items[current]?.ok ? session.items[current].data.meta.url : undefined
+        if (url) window.open(url, "_blank")
         return true
       }
       case "?":
@@ -427,23 +561,36 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   }, [review?.notes])
 
   const selectionFor = (fileIndex: number) => {
-    if (!cursor || cursor.file !== fileIndex) return null
-    const block = cursor.block === null ? undefined : model?.blocks[cursor.block]
+    if (!cursor || cursor.file !== fileIndex || !model) return null
+    if (visual) return rangeAnchor(model.rows, visual.anchor, cursorIndex).selection
+    const block = cursor.block === null ? undefined : model.blocks[cursor.block]
     if (cursorMode === "block" && block) return block.range
     return { start: cursor.line, end: cursor.line, side: cursor.side }
   }
 
   const load = session.items[current]
-  const position = cursor && model ? `${model.files[cursor.file]?.name.split("/").at(-1)}:${cursor.side === "deletions" ? "L" : "R"}${cursor.line}` : ""
+  const visualAnchor = visual && model ? rangeAnchor(model.rows, visual.anchor, cursorIndex) : undefined
+  const visualCount = visualAnchor ? visualAnchor.line - (visualAnchor.startLine ?? visualAnchor.line) + 1 : 0
+  const position = visual
+    ? `VISUAL · ${visualCount} line${visualCount === 1 ? "" : "s"} · n to comment`
+    : cursor && model
+      ? `${model.files[cursor.file]?.name.split("/").at(-1)}:${cursor.side === "deletions" ? "L" : "R"}${cursor.line}`
+      : ""
 
   if (handedBack) return <HandedBack path={handedBack} />
 
   return (
     <div className="app">
-      <Rail manifest={session.manifest} items={session.items} state={state} current={current} onSelect={(id) => {
-        setView("deck")
-        goTo(id)
-      }} />
+      <Rail
+        manifest={session.manifest}
+        items={session.items}
+        state={state}
+        current={current}
+        onSelect={(id) => {
+          setView("deck")
+          goTo(id)
+        }}
+      />
       {view === "summary" ? (
         <Summary
           manifest={session.manifest}
@@ -460,8 +607,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       ) : (
         <main className="main" ref={mainRef}>
           <PrHeader entry={entry} load={load} review={review} state={state} total={order.length} />
-          {load && !load.ok ? <div className="error">Could not load #{current}: {load.error}</div> : null}
-          {model && model.files.length === 0 ? <div className="empty">This PR has no file changes{ignoreWhitespace ? " outside whitespace" : ""}.</div> : null}
+          <PrNotes
+            notes={prNotes}
+            focus={cursorIndex === HEADER ? noteFocus : null}
+            onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
+            onDelete={deleteNote}
+          />
+          {load && !load.ok ? <div className="error">Could not load {current}: {load.error}</div> : null}
+          {model && model.files.length === 0 ? <div className="empty">No file changes{ignoreWhitespace ? " outside whitespace" : ""}.</div> : null}
           <div className="files" key={`${current}-${ignoreWhitespace}`}>
             {model?.files.map((file, index) => (
               <FileBlock
@@ -474,9 +627,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
                 notes={notesByFile.get(file.name) ?? NO_NOTES}
                 draft={draft && draft.path === file.name ? draft : null}
                 selection={selectionFor(index)}
+                visual={Boolean(visual) && cursor?.file === index}
                 diffStyle={diffStyle}
                 onLine={clickLine}
-                onAddNote={openDraft}
+                onRange={pickRange}
                 onSaveDraft={saveDraft}
                 onCancelDraft={cancelDraft}
                 onEditNote={editNote}
@@ -484,9 +638,19 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
               />
             ))}
           </div>
-          <div className="end-of-pr">End of #{current}</div>
+          <div className="end-of-pr">End of {entry.pr.number ? `#${entry.pr.number}` : entry.pr.ref}</div>
         </main>
       )}
+      {visual?.pill ? (
+        <button
+          className="comment-pill"
+          style={{ left: visual.pill.x + 12, top: visual.pill.y + 12 }}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => openRangeDraft(visual.anchor, cursorIndex)}
+        >
+          Comment <kbd>n</kbd>
+        </button>
+      ) : null}
       <StatusBar
         order={order}
         state={state}
@@ -494,9 +658,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
       />
       {help ? <Help onClose={() => setHelp(false)} /> : null}
-      {prompt === "reject" ? (
+      {prompt?.kind === "reject" ? (
         <Prompt
-          title={`Reject #${current}`}
+          title="Reject"
           placeholder="Reason (optional)"
           initial={review?.reason ?? ""}
           onCancel={() => setPrompt(null)}
@@ -506,16 +670,16 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
           }}
         />
       ) : null}
-      {prompt === "prNote" ? (
+      {prompt?.kind === "note" ? (
         <Prompt
-          title={`Note on #${current}`}
-          placeholder="PR-level note"
-          initial=""
+          title={prompt.noteId ? "Edit note" : "Note on this PR"}
+          placeholder="Write a note for the agent…"
+          initial={prompt.initial}
           multiline
           onCancel={() => setPrompt(null)}
           onSubmit={(value) => {
             setPrompt(null)
-            if (value) updateReview(current, (prev) => ({ ...prev, notes: [...prev.notes, { id: crypto.randomUUID(), body: value }] }))
+            savePrNote(prompt.noteId, value)
           }}
         />
       ) : null}

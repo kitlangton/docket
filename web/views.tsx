@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { itemId, itemLabel, type ItemLoad, type Manifest, type PrReview, type ReviewState, type Verdict } from "../src/types"
-import { countVerdicts, displayTitle, noteCount, type Entry } from "./model"
+import { itemId, itemLabel, type ItemLoad, type Manifest, type Note, type PrReview, type ReviewState, type Verdict } from "../src/types"
+import { countVerdicts, displayTitle, noteCount, noteLocation, type Entry } from "./model"
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
 const STATE_LABEL = { OPEN: "Open", MERGED: "Merged", CLOSED: "Closed", LOCAL: "Local" }
@@ -115,15 +115,31 @@ export function PrHeader(props: { entry: Entry; load: ItemLoad | undefined; revi
           {props.review.reason}
         </p>
       ) : null}
-      {props.review?.notes
-        .filter((note) => !note.path)
-        .map((note) => (
-          <p className="pr-aside" key={note.id}>
-            <span className="pr-aside-label">Note</span>
-            {note.body}
-          </p>
-        ))}
     </header>
+  )
+}
+
+export function PrNotes(props: { notes: Note[]; focus: number | null; onEdit: (note: Note) => void; onDelete: (id: string) => void }) {
+  if (!props.notes.length) return null
+  return (
+    <ul className="pr-notes">
+      {props.notes.map((note, index) => (
+        <li key={note.id} className={`pr-note${props.focus === index ? " is-focus" : ""}`}>
+          <span className="pr-note-body" onClick={() => props.onEdit(note)}>
+            {note.body}
+          </span>
+          <span className="pr-note-actions">
+            {props.focus === index ? (
+              <span className="pr-note-keys">
+                <kbd>e</kbd> edit <kbd>d</kbd> delete
+              </span>
+            ) : null}
+            <button onClick={() => props.onEdit(note)}>Edit</button>
+            <button onClick={() => props.onDelete(note.id)}>Delete</button>
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -168,15 +184,15 @@ const HELP: [string, [string, string][]][] = [
       ["r", "Reject with reason and advance"],
       ["s", "Skip and advance"],
       ["u", "Clear verdict"],
-      ["n", "Note on cursor line (PR note on header)"],
-      ["N", "Note on the PR"],
+      ["n", "Note on the PR"],
+      ["V  v", "Select lines, then n to comment"],
     ],
   ],
   [
     "View",
     [
       ["o  ⏎", "Fold / unfold file"],
-      ["v", "Split / unified"],
+      ["t", "Split / unified"],
       ["z", "Ignore whitespace"],
       ["O", "Open on GitHub"],
       ["⏎  :", "Summary"],
@@ -297,7 +313,7 @@ export function Summary(props: {
                 {review?.notes.map((note) => (
                   <div key={note.id} className="summary-detail">
                     <span className="loc">
-                      {note.path ? `${note.path.split("/").at(-1)}:${note.line}` : "PR"}
+                      {note.path ? noteLocation(note) : "PR"}
                     </span>
                     {note.body}
                   </div>

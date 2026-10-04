@@ -3,7 +3,7 @@ import { FileDiff, type FileDiffOptions } from "@pierre/diffs/react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note, Side } from "../src/types"
 
-export type Draft = { path: string; side: Side; line: number; body: string; noteId?: string }
+export type Draft = { path: string; side: Side; startLine?: number; line: number; body: string; noteId?: string }
 
 type AnnotationMeta = { kind: "note"; note: Note } | { kind: "draft"; draft: Draft }
 
@@ -16,9 +16,12 @@ export type FileBlockProps = {
   notes: Note[]
   draft: Draft | null
   selection: SelectedLineRange | null
+  /** Visual mode: show the selection as a range instead of the cursor. */
+  visual: boolean
   diffStyle: "split" | "unified"
   onLine: (file: number, side: Side, line: number) => void
-  onAddNote: (path: string, side: Side, line: number) => void
+  /** A range picked with the mouse; `compose` is true when it came from the gutter + button. */
+  onRange: (file: number, range: SelectedLineRange, compose: boolean) => void
   onSaveDraft: (body: string) => void
   onCancelDraft: () => void
   onEditNote: (note: Note) => void
@@ -26,7 +29,7 @@ export type FileBlockProps = {
 }
 
 // Injected into the diff's shadow root. Keeps the diff chrome quiet and draws one cursor indicator.
-const UNSAFE_CSS = /* css */ `
+const BASE_CSS = /* css */ `
 [data-diffs-header] { position: sticky; top: 0; z-index: 3; min-height: 0; padding: 0; background: #0a0a0a; }
 [data-separator=line-info-basic] { height: 26px; background-color: transparent; }
 [data-separator-wrapper], [data-separator-content] { background-color: transparent; }
@@ -35,14 +38,6 @@ const UNSAFE_CSS = /* css */ `
 [data-content] [data-separator=line-info-basic] { border-block: 1px solid #16181b; }
 [data-line][data-selected-line], [data-column-number][data-selected-line] {
   --diffs-computed-selected-line-bg: var(--diffs-computed-diff-line-bg);
-}
-[data-column-number][data-selected-line] { color: var(--diffs-fg-number); }
-[data-column-number][data-selected-line][data-line-type=change-addition] { color: var(--diffs-addition-base); }
-[data-column-number][data-selected-line][data-line-type=change-deletion] { color: var(--diffs-deletion-base); }
-[data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 rgba(138, 160, 255, 0.35); }
-[data-column-number]:is([data-selected-line=first], [data-selected-line=single]) { box-shadow: inset 2px 0 0 #8aa0ff; color: #f2f3f5; }
-[data-line]:is([data-selected-line=first], [data-selected-line=single]) {
-  --diffs-computed-selected-line-bg: color-mix(in lab, var(--diffs-computed-diff-line-bg) 90%, #8aa0ff);
 }
 [data-line], [data-no-newline] { --mix-dark: 87%; }
 [data-gutter-buffer], [data-column-number] { --mix-dark: 90%; }
@@ -54,10 +49,29 @@ const UNSAFE_CSS = /* css */ `
 [data-gutter-utility-slot] { opacity: 0; }
 [data-column-number]:hover [data-gutter-utility-slot] { opacity: 1; }
 [data-utility-button] { background-color: #8aa0ff; border-radius: 3px; }
+[data-column-number][data-selected-line] { color: var(--diffs-fg-number); }
+[data-column-number][data-selected-line][data-line-type=change-addition] { color: var(--diffs-addition-base); }
+[data-column-number][data-selected-line][data-line-type=change-deletion] { color: var(--diffs-deletion-base); }
+`
+
+const CURSOR_CSS = /* css */ `
+[data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 rgba(138, 160, 255, 0.35); }
+[data-column-number]:is([data-selected-line=first], [data-selected-line=single]) { box-shadow: inset 2px 0 0 #8aa0ff; color: #f2f3f5; }
+[data-line]:is([data-selected-line=first], [data-selected-line=single]) {
+  --diffs-computed-selected-line-bg: color-mix(in lab, var(--diffs-computed-diff-line-bg) 90%, #8aa0ff);
+}
+`
+
+// Visual mode tints every selected row so the range reads as one block.
+const VISUAL_CSS = /* css */ `
+[data-line][data-selected-line] {
+  --diffs-computed-selected-line-bg: color-mix(in lab, var(--diffs-computed-diff-line-bg) 76%, #8aa0ff);
+}
+[data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 #8aa0ff; color: #f2f3f5; }
 `
 
 export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
-  const { onLine, onAddNote, onToggle, index } = props
+  const { onLine, onRange, onToggle, index } = props
   const options = useMemo<FileDiffOptions<AnnotationMeta, undefined>>(
     () => ({
       theme: "pierre-dark",
@@ -68,12 +82,16 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       lineDiffType: "word-alt",
       overflow: "scroll",
       collapsed: props.collapsed,
-      unsafeCSS: UNSAFE_CSS,
+      unsafeCSS: BASE_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
       enableGutterUtility: true,
-      onGutterUtilityClick: (range) => onAddNote(props.file.name, range.side ?? "additions", range.start),
+      enableLineSelection: true,
+      onGutterUtilityClick: (range) => onRange(index, range, true),
+      onLineSelectionEnd: (range) => {
+        if (range) onRange(index, range, false)
+      },
       onLineClick: (event) => onLine(index, event.annotationSide, event.lineNumber),
     }),
-    [props.diffStyle, props.collapsed, props.file.name, onLine, onAddNote, index],
+    [props.diffStyle, props.collapsed, props.visual, onLine, onRange, index],
   )
 
   const annotations = useMemo(() => {
@@ -94,7 +112,12 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       if (meta.kind === "draft") return <DraftEditor draft={meta.draft} onSave={onSaveDraft} onCancel={onCancelDraft} />
       return (
         <div className="note" onClick={() => onEditNote(meta.note)}>
-          {meta.note.body}
+          {meta.note.startLine ? (
+            <span className="note-range">
+              Lines {meta.note.startLine}–{meta.note.line}
+            </span>
+          ) : null}
+          <span className="note-body">{meta.note.body}</span>
         </div>
       )
     },
@@ -191,7 +214,7 @@ function DraftEditor(props: { draft: Draft; onSave: (body: string) => void; onCa
         ref={ref}
         value={body}
         rows={Math.min(8, Math.max(2, body.split("\n").length))}
-        placeholder={`Note on ${props.draft.side === "deletions" ? "old" : "new"} line ${props.draft.line}`}
+        placeholder={`Note on ${props.draft.side === "deletions" ? "old" : "new"} ${props.draft.startLine ? `lines ${props.draft.startLine}–${props.draft.line}` : `line ${props.draft.line}`}`}
         onChange={(event) => setBody(event.target.value)}
         onKeyDown={(event) => {
           event.stopPropagation()
