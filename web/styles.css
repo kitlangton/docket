@@ -44,7 +44,7 @@
   /* Inset for prose in the main pane; matches the file header chevron so text and diffs share an edge. */
   --pad: 20px;
   --band: #141416;
-  --separator: #17171a;
+  --squiggle: #34343a;
 
   --diffs-font-family: var(--mono);
   --diffs-font-size: 12.5px;
@@ -76,7 +76,7 @@
     --popover: #ffffff;
     --button: #ffffff;
     --band: #fafafb;
-    --separator: #f4f4f6;
+    --squiggle: #d4d4da;
     color-scheme: light;
   }
 

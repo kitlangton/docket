@@ -33,21 +33,35 @@ export type FileBlockProps = {
 const BASE_CSS = /* css */ `
 :host { --diffs-bg: var(--bg); background-color: var(--bg); }
 [data-diffs-header] { position: sticky; top: 0; z-index: 3; min-height: 0; padding: 0; background: var(--bg); }
-[data-separator=line-info-basic] { height: 30px; background-color: transparent; }
-[data-separator-wrapper], [data-separator-content] { background-color: transparent; }
-[data-separator-content] { color: var(--text-3); font: 11.5px/1 var(--sans); padding-left: 2ch; }
-/* A low-contrast inset band per side, like diffshub's unmodified-lines rows. */
-[data-gutter] [data-separator=line-info-basic], [data-content] [data-separator=line-info-basic] {
-  background-color: var(--separator);
-  box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg);
+/* Unmodified-lines gap: a thin squiggle across every column, with the count on a chip at the code's text start. */
+[data-separator=line-info-basic] { height: 22px; margin: 0; background-color: var(--bg); }
+[data-separator=line-info-basic]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--squiggle);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0.5 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 6px;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0.5 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 6px;
+  pointer-events: none;
 }
-[data-deletions] [data-gutter] [data-separator=line-info-basic], [data-unified] [data-gutter] [data-separator=line-info-basic] {
-  border-radius: 0;
-  box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset 8px 0 0 var(--bg);
+/* Anchor the wave so it runs continuously from each gutter into its code column. */
+[data-gutter] [data-separator=line-info-basic]::before { -webkit-mask-position: right center; mask-position: right center; }
+[data-separator=line-info-basic] [data-separator-wrapper] { display: none; }
+:is([data-deletions], [data-unified]) [data-content] [data-separator=line-info-basic] [data-separator-wrapper] {
+  display: flex;
+  z-index: 1;
+  background: transparent;
+  pointer-events: none;
 }
-[data-content] [data-separator=line-info-basic] { box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset -4px 0 0 var(--bg); }
-[data-additions] [data-gutter] [data-separator=line-info-basic] { box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset 4px 0 0 var(--bg); }
-[data-additions] [data-content] [data-separator=line-info-basic] { box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset -8px 0 0 var(--bg); }
+[data-separator=line-info-basic] [data-separator-content] { background: transparent; padding: 0 0 0 1ch; overflow: visible; }
+[data-unmodified-lines] {
+  padding: 0 7px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-3);
+  font: 11px/16px var(--sans);
+  font-variant-numeric: tabular-nums;
+}
 [data-line], [data-no-newline] { --mix-dark: 88%; }
 [data-gutter-buffer], [data-column-number] { --mix-dark: 91%; }
 [data-content-buffer] { opacity: 0.5; }
