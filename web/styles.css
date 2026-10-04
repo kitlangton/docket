@@ -641,8 +641,7 @@ kbd {
   color: var(--reject);
 }
 
-.pr-band + .files > .file:first-child,
-.pr-band + .large-hint + .files > .file:first-child {
+.pr-band + .files > .file:first-child {
   border-top: 0;
 }
 
@@ -900,12 +899,6 @@ kbd {
   color: var(--text-3);
 }
 
-.draft-hint {
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--text-3);
-}
-
 .comment-pill {
   position: fixed;
   z-index: 40;
@@ -937,19 +930,10 @@ kbd {
   background: var(--raised);
 }
 
-.verdict-prompt-label {
-  color: var(--text-2);
-}
-
 .verdict-prompt.is-decided {
   gap: 10px;
   padding: 12px 16px;
   color: var(--text-2);
-}
-
-.verdict-prompt .hint {
-  font-size: var(--fs-small);
-  color: var(--text-3);
 }
 
 .verdict-button {
@@ -1086,22 +1070,6 @@ kbd {
   min-height: 44px;
 }
 
-.prompt-hint {
-  display: flex;
-  gap: 14px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-3);
-}
-
-.prompt-hint > span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-
 /* Summary */
 
 .summary {
@@ -1112,11 +1080,6 @@ kbd {
 .summary-inner {
   max-width: 820px;
   padding-top: 34px;
-}
-
-.summary-kicker {
-  font-size: var(--fs-small);
-  color: var(--text-3);
 }
 
 .summary h1 {
@@ -1177,10 +1140,6 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--raised);
-}
-
-.handback-title {
-  font-weight: 500;
 }
 
 .handback-path {
@@ -1275,20 +1234,6 @@ kbd {
 
 .ledger-body {
   white-space: pre-wrap;
-}
-
-.summary-foot {
-  display: flex;
-  gap: 16px;
-  margin-top: 24px;
-  font-size: var(--fs-small);
-  color: var(--text-3);
-}
-
-.summary-foot > span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
 }
 
 /* Hand-back */
@@ -1451,16 +1396,6 @@ kbd {
 
 .is-all-viewed {
   color: var(--approve);
-}
-
-.large-hint {
-  padding-inline: var(--pad);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 12px 0;
-  font-size: var(--fs-small);
-  color: var(--text-3);
 }
 
 /* Confidence and size */
@@ -1766,16 +1701,6 @@ kbd {
   font-size: 11px;
 }
 
-.help-foot {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin: 0;
-  color: var(--text-3);
-  font-size: var(--fs-small);
-}
-
 /* Inbox */
 
 .home {
@@ -1813,12 +1738,6 @@ kbd {
   font-size: var(--fs-title);
   font-weight: 600;
   letter-spacing: -0.015em;
-}
-
-.home-sub {
-  margin-left: 6px;
-  color: var(--text-3);
-  font-size: var(--fs-small);
 }
 
 .inbox-section {
@@ -1993,29 +1912,10 @@ kbd {
 }
 
 .inbox-empty {
-  max-width: 520px;
-  margin: 12vh auto 0;
+  margin-top: 18vh;
   text-align: center;
-  color: var(--text-2);
-}
-
-.inbox-empty-title {
-  margin: 0 0 6px;
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.inbox-empty pre {
-  display: inline-block;
-  margin: 18px 0;
-  padding: 12px 18px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--raised);
-  text-align: left;
-  font: 12.5px/1.7 var(--mono);
-  color: var(--text);
+  color: var(--text-3);
+  font: 13px var(--mono);
 }
 
 .rail-home {
@@ -2165,4 +2065,10 @@ kbd {
 
 .verdict-prompt.is-stale > span:not(.spacer):not(.pr-updated) {
   opacity: 0.6;
+}
+
+.verdict-prompt:not(.is-decided) {
+  border-color: transparent;
+  background: none;
+  padding-right: 0;
 }

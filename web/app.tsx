@@ -133,9 +133,8 @@ function MissingSession(props: { onHome: () => void }) {
     <div className="splash view-enter">
       <div className="handed-back">
         <h1>No such session</h1>
-        <p className="muted">It may have been archived or never registered with this server.</p>
         <button className="link-button" onClick={props.onHome}>
-          Back to inbox
+          Inbox
         </button>
       </div>
     </div>
@@ -1176,11 +1175,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
             {model && model.files.length === 0 ? (
               <div className="empty">No file changes{ignoreWhitespace ? " outside whitespace" : ""}.</div>
             ) : null}
-            {model?.large ? (
-              <p className="large-hint">
-                Large change: files start folded. <kbd>f</kbd> jump to a file · <kbd>o</kbd> unfold · <kbd>x</kbd> mark viewed
-              </p>
-            ) : null}
             <div className="files" key={`${current}-${ignoreWhitespace}`}>
               {model?.files.map((file, index) => (
                 <FileBlock
@@ -1229,7 +1223,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => openRangeDraft(visual.anchor, cursorIndex)}
         >
-          Comment <kbd>c</kbd>
+          Comment
         </button>
       ) : null}
       {bar?.kind === "command" ? (
@@ -1284,7 +1278,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       {prompt?.kind === "reject" ? (
         <Prompt
           title="Reject"
-          placeholder="Reason (optional)"
+          placeholder="Reason"
           initial={review?.reason ?? ""}
           onCancel={() => setPrompt(null)}
           onSubmit={(value) => {
@@ -1295,8 +1289,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       ) : null}
       {prompt?.kind === "note" ? (
         <Prompt
-          title={prompt.noteId ? "Edit note" : "Note on this PR"}
-          placeholder="Write a note for the agent…"
+          title="Note"
+          placeholder=""
           initial={prompt.initial}
           multiline
           onCancel={() => setPrompt(null)}

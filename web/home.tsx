@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import type { InboxEntry, SessionStatus } from "../src/types"
 import { feed, keyName, type Pending } from "./keymap"
-import { Glyph, Help, Keys } from "./views"
+import { Glyph, Help } from "./views"
 
 const SECTIONS: { status: SessionStatus; title: string; empty: string }[] = [
-  { status: "waiting", title: "Waiting on you", empty: "Nothing is waiting on you." },
+  { status: "waiting", title: "Waiting on you", empty: "" },
   { status: "progress", title: "In progress", empty: "" },
   { status: "done", title: "Done", empty: "" },
 ]
@@ -46,7 +46,7 @@ export function Home(props: { tick: number; onOpen: (id: string) => void }) {
   }, [current?.id])
 
   const archive = async (row: InboxEntry) => {
-    if (row.status === "waiting") return setMessage("A client is still waiting on that session")
+    if (row.status === "waiting") return setMessage("Still waiting")
     await fetch(`/api/s/${encodeURIComponent(row.id)}/archive`, { method: "POST", body: JSON.stringify({ archived: true }) })
     setSelected(ordered[index + 1]?.id ?? ordered[index - 1]?.id ?? null)
     setMessage(`Archived ${row.title}`)
@@ -98,7 +98,6 @@ export function Home(props: { tick: number; onOpen: (id: string) => void }) {
             </svg>
           </span>
           <h1>docket</h1>
-          <span className="home-sub">{waiting ? `${waiting} waiting on you` : rows?.length ? "Nothing waiting" : ""}</span>
         </header>
         {rows === null ? null : rows.length === 0 ? (
           <EmptyInbox />
@@ -135,22 +134,8 @@ export function Home(props: { tick: number; onOpen: (id: string) => void }) {
           <span className="hint">
             <kbd>?</kbd> keys
           </span>
-          {rows?.length ? (
-            <>
-              <span className="hint">
-                <Keys>j k</Keys> move
-              </span>
-              <span className="hint">
-                <kbd>↵</kbd> open
-              </span>
-              <span className="hint">
-                <kbd>d</kbd> archive
-              </span>
-            </>
-          ) : null}
           {message ? <span className="status-message">{message}</span> : null}
         </span>
-        <span className="status-right">{location.host}</span>
       </footer>
       {help ? <Help onClose={() => setHelp(false)} /> : null}
     </div>
@@ -217,12 +202,7 @@ function InboxRow(props: { row: InboxEntry; selected: boolean; onOpen: () => voi
 function EmptyInbox() {
   return (
     <div className="inbox-empty">
-      <p className="inbox-empty-title">No sessions yet</p>
-      <p>Put pull requests on the docket from any checkout, and they show up here.</p>
-      <pre>
-        <code>{"docket 52985 52988\ndocket --author @me --state open\ndocket my-branch"}</code>
-      </pre>
-      <p className="muted">The command waits until you hand the session back, then prints your verdicts.</p>
+      <code>docket &lt;prs&gt;</code>
     </div>
   )
 }

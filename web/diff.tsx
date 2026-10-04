@@ -313,7 +313,7 @@ function DraftEditor(props: { draft: Draft; onSave: (body: string) => void; onCa
         ref={ref}
         value={body}
         rows={Math.min(8, Math.max(2, body.split("\n").length))}
-        placeholder={`Note on ${props.draft.side === "deletions" ? "old" : "new"} ${props.draft.startLine ? `lines ${props.draft.startLine}–${props.draft.line}` : `line ${props.draft.line}`}`}
+        placeholder={props.draft.startLine ? `Lines ${props.draft.startLine}–${props.draft.line}` : `Line ${props.draft.line}`}
         onChange={(event) => setBody(event.target.value)}
         onKeyDown={(event) => {
           event.stopPropagation()
@@ -324,9 +324,6 @@ function DraftEditor(props: { draft: Draft; onSave: (body: string) => void; onCa
           }
         }}
       />
-      <div className="draft-hint">
-        Enter to save · Shift-Enter for newline · Esc to cancel{props.draft.noteId ? " · empty deletes" : ""}
-      </div>
     </div>
   )
 }

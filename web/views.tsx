@@ -301,21 +301,8 @@ export function PrNotes(props: { notes: Note[]; focus: number | null; onEdit: (n
             {note.body}
           </span>
           <span className="pr-note-actions">
-            {props.focus === index ? (
-              <>
-                <span>
-                  <kbd>e</kbd> edit
-                </span>
-                <span>
-                  <kbd>d</kbd> delete
-                </span>
-              </>
-            ) : (
-              <>
-                <button onClick={() => props.onEdit(note)}>Edit</button>
-                <button onClick={() => props.onDelete(note.id)}>Delete</button>
-              </>
-            )}
+            <button onClick={() => props.onEdit(note)}>Edit</button>
+            <button onClick={() => props.onDelete(note.id)}>Delete</button>
           </span>
         </li>
       ))}
@@ -353,26 +340,12 @@ export function VerdictPrompt(props: {
         <span>
           {VERDICT_LABEL[props.verdict]} {props.label}
         </span>
-        <span className="spacer" />
-        <span className="hint">
-          <kbd>c</kbd> comment
-        </span>
-        <span className="hint">
-          <kbd>u</kbd> undo
-        </span>
-        <span className="hint">
-          <kbd>J</kbd> next
-        </span>
       </div>
     )
   }
   return (
     <div className="verdict-prompt">
-      <span className="verdict-prompt-label">Verdict on {props.label}</span>
       <span className="spacer" />
-      <span className="hint">
-        <kbd>c</kbd> comment
-      </span>
       <VerdictButton verdict="approve" k="a" label="Approve" onDecide={props.onDecide} />
       <VerdictButton verdict="reject" k="r" label="Reject" onDecide={props.onDecide} />
       <VerdictButton verdict="skip" k="s" label="Skip" onDecide={props.onDecide} />
@@ -461,9 +434,6 @@ export function Help(props: { onClose: () => void }) {
             </dl>
           </section>
         ))}
-        <p className="help-foot">
-          Counts work on navigation: <Keys>3 j</Keys> <Keys>2 ]</Keys> <Keys>1 0 G</Keys>
-        </p>
       </div>
     </div>
   )
@@ -534,17 +504,6 @@ export function Prompt(props: {
             }
           }}
         />
-        <div className="prompt-hint">
-          <span>
-            <kbd>↵</kbd> save
-          </span>
-          <span>
-            <kbd>⇧↵</kbd> newline
-          </span>
-          <span>
-            <kbd>esc</kbd> cancel
-          </span>
-        </div>
       </div>
     </div>
   )
@@ -570,7 +529,6 @@ export function Summary(props: {
   return (
     <div className="summary view-enter" ref={ref}>
       <div className="summary-inner">
-        <div className="summary-kicker">Summary</div>
         <h1>{props.manifest.title}</h1>
         {props.manifest.summary ? <p className="pr-why">{props.manifest.summary}</p> : null}
         <div className="stats">
@@ -580,10 +538,7 @@ export function Summary(props: {
           <Stat value={counts.unreviewed} label="Unreviewed" kind="none" />
         </div>
         <div className="handback">
-          <div>
-            <div className="handback-title">Hand back to the agent</div>
-            <div className="handback-path">{props.outPath}</div>
-          </div>
+          <div className="handback-path">{props.outPath}</div>
           <button className="handback-button" onMouseDown={(event) => event.preventDefault()} onClick={props.onHandBack}>
             <kbd>w</kbd> Hand back
           </button>
@@ -638,17 +593,6 @@ export function Summary(props: {
             </section>
           )
         })}
-        <div className="summary-foot">
-          <span>
-            <Keys>j k</Keys> move
-          </span>
-          <span>
-            <kbd>↵</kbd> open
-          </span>
-          <span>
-            <kbd>esc</kbd> back
-          </span>
-        </div>
       </div>
     </div>
   )
@@ -688,7 +632,7 @@ export function HandedBack(props: { path: string; state: ReviewState; order: str
         </p>
         <p className="handed-back-path">{props.path}</p>
         <button className="link-button" onMouseDown={(event) => event.preventDefault()} onClick={props.onHome}>
-          Back to inbox <Keys>g h</Keys>
+          Inbox
         </button>
       </div>
     </div>
@@ -719,7 +663,7 @@ export function FilePalette(props: {
           autoFocus
           className="palette-input"
           value={query}
-          placeholder={`Jump to file · ${props.viewed.size}/${props.files.length} viewed`}
+          placeholder="File"
           onChange={(event) => {
             setQuery(event.target.value)
             setSelected(0)
