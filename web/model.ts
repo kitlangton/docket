@@ -12,7 +12,11 @@ import {
 
 export type Row = { file: number; side: Side; line: number; kind: "context" | "add" | "del"; block: number | null }
 export type Block = { file: number; first: number; last: number; range: SelectedLineRange }
-export type PrModel = { files: FileDiffMetadata[]; focus: Set<string>; rows: Row[]; blocks: Block[] }
+export type PrModel = { files: FileDiffMetadata[]; focus: Set<string>; rows: Row[]; blocks: Block[]; large: boolean }
+
+/** Past either limit, files start folded so the page stays fast; the file palette (f) is the way around. */
+const LARGE_FILES = 30
+const LARGE_LINES = 3000
 export type Entry = { id: string; pr: ManifestItem; group: ManifestGroup; index: number }
 
 export const EMPTY_REVIEW: PrReview = { verdict: null, notes: [] }
@@ -58,7 +62,7 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
       })
     }),
   )
-  return { files, focus, rows, blocks }
+  return { files, focus, rows, blocks, large: files.length > LARGE_FILES || rows.length > LARGE_LINES }
 }
 
 /**
@@ -83,6 +87,26 @@ export function noteLocation(note: { path?: string; startLine?: number; line?: n
   if (!note.path) return ""
   const lines = note.startLine ? `${note.startLine}–${note.line}` : `${note.line}`
   return `${note.path.split("/").at(-1)}:${lines}`
+}
+
+/** Subsequence match: lower is better, undefined when `query` is not a subsequence of `path`. */
+export function fuzzyScore(path: string, query: string) {
+  if (!query) return 0
+  const haystack = path.toLowerCase()
+  const needle = query.toLowerCase()
+  const base = haystack.lastIndexOf("/") + 1
+  const result = [...needle].reduce<{ at: number; score: number } | undefined>(
+    (state, char) => {
+      if (!state) return undefined
+      const at = haystack.indexOf(char, state.at)
+      if (at < 0) return undefined
+      const gap = at - state.at
+      return { at: at + 1, score: state.score + gap + (at < base ? 2 : 0) }
+    },
+    { at: 0, score: 0 },
+  )
+  if (!result) return undefined
+  return result.score + (haystack.slice(base).includes(needle) ? -100 : 0)
 }
 
 export function nextUnreviewed(order: string[], state: ReviewState, from: string) {

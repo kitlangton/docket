@@ -12,6 +12,7 @@ export type FileBlockProps = {
   file: FileDiffMetadata
   focus: boolean
   collapsed: boolean
+  viewed: boolean
   cursorHere: boolean
   notes: Note[]
   draft: Draft | null
@@ -87,7 +88,6 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       hunkSeparators: "line-info-basic",
       lineDiffType: "word-alt",
       overflow: "scroll",
-      collapsed: props.collapsed,
       unsafeCSS: BASE_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
       enableGutterUtility: true,
       enableLineSelection: true,
@@ -97,7 +97,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       },
       onLineClick: (event) => onLine(index, event.annotationSide, event.lineNumber),
     }),
-    [props.diffStyle, props.collapsed, props.visual, onLine, onRange, index],
+    [props.diffStyle, props.visual, onLine, onRange, index],
   )
 
   const annotations = useMemo(() => {
@@ -136,22 +136,32 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
         file={file}
         focus={props.focus}
         collapsed={props.collapsed}
+        viewed={props.viewed}
         cursorHere={props.cursorHere}
         notes={props.notes.length}
         onToggle={onToggle}
       />
     ),
-    [props.focus, props.collapsed, props.cursorHere, props.notes.length, onToggle],
+    [props.focus, props.collapsed, props.viewed, props.cursorHere, props.notes.length, onToggle],
   )
 
+  const className = `file${props.viewed ? " is-viewed" : ""}`
+  // A folded file is only its header: skipping the diff component keeps PRs with hundreds of files fast.
+  if (props.collapsed) {
+    return (
+      <section className={className} data-file-index={props.index} data-collapsed="">
+        {renderHeader(props.file)}
+      </section>
+    )
+  }
   return (
-    <section className="file" data-file-index={props.index} data-collapsed={props.collapsed ? "" : undefined}>
+    <section className={className} data-file-index={props.index}>
       <FileDiff<AnnotationMeta, undefined>
         fileDiff={props.file}
         options={options}
         lineAnnotations={annotations}
         renderAnnotation={renderAnnotation}
-        selectedLines={props.collapsed ? null : props.selection}
+        selectedLines={props.selection}
         renderCustomHeader={renderHeader}
         disableWorkerPool
       />
@@ -163,6 +173,7 @@ function FileHeader(props: {
   file: FileDiffMetadata
   focus: boolean
   collapsed: boolean
+  viewed: boolean
   cursorHere: boolean
   notes: number
   onToggle: (path: string) => void
@@ -194,6 +205,7 @@ function FileHeader(props: {
         <span className="fh-name">{props.file.name.slice(slash + 1)}</span>
       </span>
       {props.focus ? <span className="fh-tag is-focus">focus</span> : null}
+      {props.viewed ? <span className="fh-tag is-viewed">Viewed</span> : null}
       {props.notes ? <span className="fh-tag">{props.notes === 1 ? "1 note" : `${props.notes} notes`}</span> : null}
       <span className="fh-count">
         {kind ? <span>{kind}</span> : null}

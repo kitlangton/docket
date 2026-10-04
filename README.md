@@ -50,7 +50,9 @@ Progress is saved continuously, so a reload or restart resumes where you were. A
 | `u`                 | Clear the verdict                                                     |
 | `n` / `N`           | Note on the whole PR                                                  |
 | `V` / `v`           | Select lines (visual mode): `j`/`k` extend, `n` or `Enter` comments, `Esc` exits |
-| `o`                 | Fold / unfold the file under the cursor (deleted files start folded)  |
+| `f`                 | Jump to a file (fuzzy)                                                |
+| `x`                 | Mark the file under the cursor viewed (folds it; progress in the header) |
+| `o`                 | Fold / unfold the file under the cursor (deleted and viewed files start folded) |
 | `t`                 | Toggle split / unified                                                |
 | `z`                 | Toggle ignoring whitespace                                            |
 | `O`                 | Open on GitHub                                                        |
@@ -59,6 +61,8 @@ Progress is saved continuously, so a reload or restart resumes where you were. A
 | `?`                 | Help                                                                  |
 
 PR notes are listed under the header. From the header, `j`/`k` step through them; `e` (or `Enter`) edits the focused note, `d` deletes it, and `Esc` leaves. In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels; saving an empty note deletes it.
+
+Changes with more than 30 files or 3,000 diff lines open with every file folded (except `focus` files), so even very large PRs render instantly; use `f`, `o`, and `x` to work through them.
 
 With the mouse, drag across line numbers to select a range and click **Comment**, click a line to move the cursor there, click a file header to fold it, and click any note to edit it.
 

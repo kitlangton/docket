@@ -10,7 +10,7 @@ import {
   type ReviewState,
   type Verdict,
 } from "../src/types"
-import { countVerdicts, displayTitle, noteCount, noteLocation, type Entry } from "./model"
+import { countVerdicts, displayTitle, fuzzyScore, noteCount, noteLocation, type Entry } from "./model"
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
 const STATE_LABEL = { OPEN: "Open", MERGED: "Merged", CLOSED: "Closed", LOCAL: "Local" }
@@ -124,6 +124,7 @@ export function PrHeader(props: {
   review: PrReview | undefined
   state: ReviewState
   total: number
+  viewed: { done: number; total: number } | null
 }) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
   const stats = meta
@@ -167,6 +168,11 @@ export function PrHeader(props: {
             {stats.join(" · ")}
             {meta.additions ? <span className="add"> +{meta.additions}</span> : null}
             {meta.deletions ? <span className="del"> −{meta.deletions}</span> : null}
+            {props.viewed ? (
+              <span className={props.viewed.done === props.viewed.total ? "is-all-viewed" : undefined}>
+                {props.viewed.done}/{props.viewed.total} files viewed
+              </span>
+            ) : null}
             {props.entry.pr.after?.map((number) => (
               <span key={number} className="after">
                 after #{number}
@@ -316,11 +322,13 @@ const HELP: [string, [string, string][]][] = [
       ["n", "Note on the PR"],
       ["V", "Select lines to comment"],
       ["e d", "Edit / delete a PR note"],
+      ["x", "Mark file viewed"],
     ],
   ],
   [
     "View",
     [
+      ["f", "Jump to file"],
       ["o", "Fold / unfold file"],
       ["t", "Split / unified"],
       ["z", "Ignore whitespace"],
@@ -532,6 +540,75 @@ export function HandedBack(props: { path: string; state: ReviewState; order: str
         </p>
         <p className="handed-back-path">{props.path}</p>
         <p className="muted">You can close this tab.</p>
+      </div>
+    </div>
+  )
+}
+
+export function FilePalette(props: {
+  files: { name: string; additions: number; deletions: number }[]
+  viewed: Set<string>
+  onPick: (index: number) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState("")
+  const [selected, setSelected] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null)
+  const matches = props.files
+    .map((file, index) => ({ file, index, score: fuzzyScore(file.name, query) }))
+    .filter((match): match is typeof match & { score: number } => match.score !== undefined)
+    .sort((a, b) => a.score - b.score || a.index - b.index)
+  const active = Math.min(selected, Math.max(0, matches.length - 1))
+  useEffect(() => {
+    listRef.current?.querySelector(".palette-row.is-selected")?.scrollIntoView({ block: "nearest" })
+  }, [active])
+  return (
+    <div className="overlay is-top" onClick={props.onClose}>
+      <div className="palette" onClick={(event) => event.stopPropagation()}>
+        <input
+          autoFocus
+          className="palette-input"
+          value={query}
+          placeholder={`Jump to file · ${props.viewed.size}/${props.files.length} viewed`}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setSelected(0)
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+            const move = (delta: number) => {
+              event.preventDefault()
+              setSelected(Math.max(0, Math.min(matches.length - 1, active + delta)))
+            }
+            if (event.key === "Escape") return props.onClose()
+            if (event.key === "ArrowDown" || (event.ctrlKey && (event.key === "n" || event.key === "j"))) return move(1)
+            if (event.key === "ArrowUp" || (event.ctrlKey && (event.key === "p" || event.key === "k"))) return move(-1)
+            if (event.key === "Enter" && matches[active]) return props.onPick(matches[active].index)
+          }}
+        />
+        <div className="palette-list" ref={listRef}>
+          {matches.map((match, position) => {
+            const slash = match.file.name.lastIndexOf("/")
+            return (
+              <div
+                key={match.file.name}
+                className={`palette-row${position === active ? " is-selected" : ""}${props.viewed.has(match.file.name) ? " is-viewed" : ""}`}
+                onMouseMove={() => setSelected(position)}
+                onClick={() => props.onPick(match.index)}
+              >
+                <span className="palette-name">{match.file.name.slice(slash + 1)}</span>
+                <span className="palette-dir">{match.file.name.slice(0, slash + 1)}</span>
+                <span className="spacer" />
+                {props.viewed.has(match.file.name) ? <span className="palette-viewed">Viewed</span> : null}
+                <span className="palette-count tabular">
+                  {match.file.additions ? <span className="add">+{match.file.additions}</span> : null}
+                  {match.file.deletions ? <span className="del">−{match.file.deletions}</span> : null}
+                </span>
+              </div>
+            )
+          })}
+          {matches.length ? null : <div className="palette-empty">No matching files</div>}
+        </div>
       </div>
     </div>
   )

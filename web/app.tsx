@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { itemLabel, type Note, type PrReview, type ReviewState, type SessionPayload, type Side, type Verdict } from "../src/types"
 import { FileBlock, type Draft } from "./diff"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
-import { HandedBack, Help, PrHeader, PrNotes, PrSkeleton, Prompt, Rail, StatusBar, Summary, VerdictPrompt } from "./views"
+import { FilePalette, HandedBack, Help, PrHeader, PrNotes, PrSkeleton, Prompt, Rail, StatusBar, Summary, VerdictPrompt } from "./views"
 
 export function App() {
   const [session, setSession] = useState<SessionPayload>()
@@ -58,6 +58,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [help, setHelp] = useState(false)
+  const [palette, setPalette] = useState(false)
   const [prompt, setPrompt] = useState<PromptState | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [summaryIndex, setSummaryIndex] = useState(0)
@@ -86,10 +87,12 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const prNotes = useMemo(() => (review?.notes ?? []).filter((note) => !note.path), [review?.notes])
   const cursorIndex = model?.rows.length ? Math.min(cursors[current] ?? HEADER, model.rows.length - 1) : HEADER
   const cursor: Row | undefined = cursorIndex === HEADER ? undefined : model?.rows[cursorIndex]
+  const viewed = useMemo(() => new Set(review?.viewed ?? []), [review?.viewed])
   const isCollapsed = (fileIndex: number) => {
     const file = model?.files[fileIndex]
     if (!file) return false
-    return folds[`${current}:${file.name}`] ?? file.type === "deleted"
+    const folded = file.type === "deleted" || viewed.has(file.name) || (model.large && !model.focus.has(file.name))
+    return folds[`${current}:${file.name}`] ?? folded
   }
   // Blocks inside a folded file collapse into one stop at that file's header.
   const navBlocks = (model?.blocks ?? []).filter(
@@ -224,12 +227,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const toggleFold = useCallback(
     (path: string) => {
       const file = model?.files.find((item) => item.name === path)
-      if (!file) return
+      if (!model || !file) return
       const key = `${current}:${path}`
+      const folded = file.type === "deleted" || viewed.has(path) || (model.large && !model.focus.has(path))
       scrollIntent.current = "top"
-      setFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? file.type === "deleted") }))
+      setFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? folded) }))
     },
-    [model, current],
+    [model, current, viewed],
   )
 
   const cancelDraft = useCallback(() => setDraft(null), [])
@@ -264,6 +268,29 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     },
     [rowIndex, openRangeDraft, clickLine, current],
   )
+
+  /** Moves the cursor to a file: its first change, or its header when folded or empty. */
+  const jumpToFile = (fileIndex: number) => {
+    const rows = model?.rows ?? []
+    const index = navBlocks.find((b) => b.file === fileIndex)?.first ?? rows.findIndex((row) => row.file === fileIndex)
+    if (index >= 0) return moveCursor(index, "top")
+    mainRef.current?.querySelector(`[data-file-index="${fileIndex}"]`)?.scrollIntoView({ block: "start" })
+  }
+
+  const toggleViewed = () => {
+    if (!cursor || !model) return
+    const path = model.files[cursor.file]!.name
+    const marking = !viewed.has(path)
+    updateReview(current, (prev) => ({
+      ...prev,
+      viewed: marking ? [...(prev.viewed ?? []), path] : (prev.viewed ?? []).filter((item) => item !== path),
+    }))
+    setFolds((prev) => {
+      const { [`${current}:${path}`]: _, ...rest } = prev
+      return rest
+    })
+    if (marking && cursor.file + 1 < model.files.length) jumpToFile(cursor.file + 1)
+  }
 
   const handBack = async () => {
     const res = await fetch("/api/handback", { method: "POST", body: JSON.stringify(state) })
@@ -302,7 +329,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       const target = event.target
       if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) return
       if (event.metaKey || event.altKey) return
-      if (prompt || draft) return
+      if (prompt || draft || palette) return
       const key = event.ctrlKey ? `C-${event.key}` : event.key
       const handled = view === "summary" ? summaryKey(key) : deckKey(key)
       if (!handled) return
@@ -523,6 +550,12 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         if (url) window.open(url, "_blank")
         return true
       }
+      case "f":
+        setPalette(true)
+        return true
+      case "x":
+        toggleViewed()
+        return true
       case "?":
         setHelp(true)
         return true
@@ -600,7 +633,18 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       ) : (
         <main className="main" ref={mainRef}>
           <div className="pr-view view-enter" key={current}>
-            <PrHeader entry={entry} load={load} review={review} state={state} total={order.length} />
+            <PrHeader
+              entry={entry}
+              load={load}
+              review={review}
+              state={state}
+              total={order.length}
+              viewed={
+                model && viewed.size
+                  ? { done: model.files.filter((file) => viewed.has(file.name)).length, total: model.files.length }
+                  : null
+              }
+            />
             <PrNotes
               notes={prNotes}
               focus={cursorIndex === HEADER ? noteFocus : null}
@@ -615,6 +659,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
             {model && model.files.length === 0 ? (
               <div className="empty">No file changes{ignoreWhitespace ? " outside whitespace" : ""}.</div>
             ) : null}
+            {model?.large ? (
+              <p className="large-hint">
+                Large change: files start folded. <kbd>f</kbd> jump to a file · <kbd>o</kbd> unfold · <kbd>x</kbd> mark viewed
+              </p>
+            ) : null}
             <div className="files" key={`${current}-${ignoreWhitespace}`}>
               {model?.files.map((file, index) => (
                 <FileBlock
@@ -623,6 +672,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
                   file={file}
                   focus={model.focus.has(file.name)}
                   collapsed={isCollapsed(index)}
+                  viewed={viewed.has(file.name)}
                   cursorHere={cursor?.file === index}
                   notes={notesByFile.get(file.name) ?? NO_NOTES}
                   draft={draft && draft.path === file.name ? draft : null}
@@ -667,6 +717,21 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
       />
       {help ? <Help onClose={() => setHelp(false)} /> : null}
+      {palette && model ? (
+        <FilePalette
+          files={model.files.map((file) => ({
+            name: file.name,
+            additions: file.hunks.reduce((sum, hunk) => sum + hunk.additionLines, 0),
+            deletions: file.hunks.reduce((sum, hunk) => sum + hunk.deletionLines, 0),
+          }))}
+          viewed={viewed}
+          onClose={() => setPalette(false)}
+          onPick={(index) => {
+            setPalette(false)
+            jumpToFile(index)
+          }}
+        />
+      ) : null}
       {prompt?.kind === "reject" ? (
         <Prompt
           title="Reject"
