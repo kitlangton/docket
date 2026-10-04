@@ -217,6 +217,8 @@ bun run e2e         # end-to-end tests against throwaway git repos
 bun run keys        # regenerate the README key table
 ```
 
+The server serves a minified build of the web app. Run it with `DOCKET_DEV=1` (for example `DOCKET_DEV=1 docket server restart`) to serve it through Bun's development bundler instead.
+
 The end-to-end tests run each case on its own port with temporary data and cache directories, so they don't touch a running docket.
 
 Releases publish to npm from CI on a version tag, using npm trusted publishing:

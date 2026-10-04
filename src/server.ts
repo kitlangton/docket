@@ -19,6 +19,8 @@ import {
   type WaitEvent,
 } from "./types"
 
+/** `DOCKET_DEV=1` serves the web app through Bun's development bundler, with hot reloading, for working on docket. */
+const DEV = process.env.DOCKET_DEV === "1"
 const REFRESH_MS = Number(process.env.DOCKET_REFRESH_MS ?? 60_000)
 /** Exit after this long with no connected tabs and no waiting clients. */
 const IDLE_MS = Number(process.env.DOCKET_IDLE_MS ?? 30 * 60_000)
@@ -54,7 +56,10 @@ export async function serve(options: ServerOptions) {
   const waiters = new Map<string, Set<Stream>>()
   const tabs = new Map<string, Stream & { at: string }>()
   const idle = { since: Date.now() }
-  const publicUrl = (await portlessAlias(options.port)) ?? `http://docket.localhost:${options.port}`
+  const [publicUrl, app] = await Promise.all([
+    portlessAlias(options.port).then((alias) => alias ?? `http://docket.localhost:${options.port}`),
+    DEV ? undefined : buildApp(),
+  ])
 
   const saveIndex = () => writeAtomic(indexPath, JSON.stringify(entries, null, 2))
 
@@ -123,11 +128,10 @@ export async function serve(options: ServerOptions) {
   const server = Bun.serve({
     port: options.port,
     hostname: "127.0.0.1",
-    development: false,
+    development: DEV,
     idleTimeout: 0,
     routes: {
-      "/": index,
-      "/s/:id": index,
+      ...(app ?? { "/": index, "/s/:id": index }),
       "/api/health": {
         GET: () => Response.json({ app: APP_ID, version: options.version, pid: process.pid, port: options.port, url: publicUrl }),
       },
@@ -399,6 +403,32 @@ async function readIndex(path: string): Promise<Record<string, Entry>> {
     await rename(path, aside)
     return {}
   })
+}
+
+/**
+ * The web app as minified static routes. Code splitting keeps syntax-highlighting grammars and themes in their
+ * own chunks, which load only when a diff needs them.
+ */
+async function buildApp() {
+  const result = await Bun.build({
+    entrypoints: [join(import.meta.dir, "..", "web", "index.html")],
+    minify: true,
+    splitting: true,
+    target: "browser",
+    publicPath: "/",
+  })
+  if (!result.success) throw new AggregateError(result.logs, "building the web app failed")
+  const routes = Object.fromEntries(
+    await Promise.all(
+      result.outputs.map(async (output) => {
+        const html = output.path.endsWith(".html")
+        const headers = { "content-type": output.type, "cache-control": html ? "no-cache" : "max-age=31536000, immutable" }
+        return [`/${output.path.replace(/^\.\//, "")}`, new Response(await output.arrayBuffer(), { headers })] as const
+      }),
+    ),
+  )
+  const page = Object.entries(routes).find(([path]) => path.endsWith(".html"))![1]
+  return { ...routes, "/": page, "/s/:id": page }
 }
 
 /** If portless is installed, serve docket at https://docket.localhost through it. */
