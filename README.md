@@ -32,7 +32,7 @@ Review progress is saved continuously to `<session>.state.json` next to the sess
 
 | Key                 | Action                                     |
 | ------------------- | ------------------------------------------ |
-| `j` / `k`           | Next / previous change                     |
+| `j` / `k`           | Next / previous change; `k` from the first change returns to the PR header |
 | `Ctrl-n` / `Ctrl-p` | Next / previous line                       |
 | `]` / `[`           | Next / previous file                       |
 | `J` / `K`           | Next / previous PR                         |
@@ -42,7 +42,7 @@ Review progress is saved continuously to `<session>.state.json` next to the sess
 | `r`                 | Reject with an optional reason, and advance |
 | `s`                 | Skip and advance                           |
 | `u`                 | Clear the verdict                          |
-| `n`                 | Note on the cursor line (edits an existing note there) |
+| `n`                 | Note on the cursor line (edits an existing note there); a PR-level note when on the header |
 | `N`                 | PR-level note                              |
 | `o`                 | Fold / unfold the file under the cursor (deleted files start folded) |
 | `v`                 | Toggle split / unified                     |

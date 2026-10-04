@@ -163,7 +163,7 @@ const HELP: [string, [string, string][]][] = [
       ["r", "Reject with reason and advance"],
       ["s", "Skip and advance"],
       ["u", "Clear verdict"],
-      ["n", "Note on cursor line"],
+      ["n", "Note on cursor line (PR note on header)"],
       ["N", "Note on the PR"],
     ],
   ],

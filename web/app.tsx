@@ -55,7 +55,10 @@ function Loading(props: { session: SessionPayload }) {
 }
 
 type PromptKind = "reject" | "prNote"
-type ScrollIntent = "top" | "visible" | "reset" | "none"
+type ScrollIntent = "top" | "visible" | "none"
+
+// Cursor position above the first change: the PR header, shown at scroll top.
+const HEADER = -1
 
 function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const session = props.session
@@ -80,7 +83,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const [written, setWritten] = useState<string | null>(null)
   const [folds, setFolds] = useState<Record<string, boolean>>({})
   const mainRef = useRef<HTMLDivElement>(null)
-  const scrollIntent = useRef<ScrollIntent>("reset")
+  const scrollIntent = useRef<ScrollIntent>("top")
   const pendingG = useRef(0)
 
   const models = useMemo(() => {
@@ -97,8 +100,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const entry = entries[order.indexOf(current)]!
   const model = models.get(current)
   const review = state.reviews[current]
-  const cursorIndex = model ? Math.min(cursors[current] ?? model.blocks[0]?.first ?? 0, Math.max(0, model.rows.length - 1)) : 0
-  const cursor: Row | undefined = model?.rows[cursorIndex]
+  const cursorIndex = model?.rows.length ? Math.min(cursors[current] ?? HEADER, model.rows.length - 1) : HEADER
+  const cursor: Row | undefined = cursorIndex === HEADER ? undefined : model?.rows[cursorIndex]
   const isCollapsed = (fileIndex: number) => {
     const file = model?.files[fileIndex]
     if (!file) return false
@@ -127,9 +130,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   }, [])
 
   const goTo = useCallback((number: number) => {
-    scrollIntent.current = "reset"
+    scrollIntent.current = "top"
     setDraft(null)
     setCursorMode("block")
+    setCursors((prev) => ({ ...prev, [number]: HEADER }))
     setState((prev) => ({ ...prev, current: number }))
   }, [])
 
@@ -211,11 +215,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     scrollIntent.current = "none"
     const main = mainRef.current
     if (!main || view !== "deck" || intent === "none") return
-    if (intent === "reset" && !cursors[current]) {
+    if (!cursor) {
       main.scrollTop = 0
       return
     }
-    if (!cursor) return
     const frame = { id: 0, tries: 0 }
     const attempt = () => {
       const element = rowElement(main, cursor)
@@ -230,7 +233,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     }
     attempt()
     return () => cancelAnimationFrame(frame.id)
-  }, [cursorIndex, current, view, diffStyle, cursor, cursors])
+  }, [cursorIndex, current, view, diffStyle, cursor])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -290,10 +293,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     const isG = key === "g" && Date.now() - pendingG.current < 600
     pendingG.current = key === "g" && !isG ? Date.now() : 0
     if (key === "g") {
-      if (isG) {
-        moveCursor(blocks[0]?.first ?? 0, "reset")
-        if (mainRef.current) mainRef.current.scrollTop = 0
-      }
+      if (isG) moveCursor(HEADER, "top")
       return true
     }
     switch (key) {
@@ -301,17 +301,18 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       case "k": {
         const block = key === "j" ? blocks.find((b) => b.first > cursorIndex) : blocks.findLast((b) => b.first < cursorIndex)
         if (block) moveCursor(block.first, "top")
+        if (!block && key === "k") moveCursor(HEADER, "top")
         return true
       }
       case "C-n":
       case "C-p": {
-        const index = key === "C-n" ? Math.min(rows.length - 1, cursorIndex + 1) : Math.max(0, cursorIndex - 1)
+        const index = key === "C-n" ? Math.min(rows.length - 1, cursorIndex + 1) : Math.max(HEADER, cursorIndex - 1)
         moveCursor(index, "visible", "line")
         return true
       }
       case "]":
       case "[": {
-        const file = cursor?.file ?? 0
+        const file = cursor?.file ?? HEADER
         const target = key === "]" ? file + 1 : cursor && rows.findIndex((row) => row.file === file) < cursorIndex ? file : file - 1
         const index = blocks.find((b) => b.file === target)?.first ?? rows.findIndex((row) => row.file === target)
         if (index >= 0) moveCursor(index, "top")
@@ -334,6 +335,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         const main = mainRef.current
         if (!main) return true
         main.scrollTop += key === "C-d" ? half : -half
+        if (main.scrollTop === 0) {
+          moveCursor(HEADER, "none")
+          return true
+        }
         const visible = blocks.find((b) => {
           const element = rows[b.first] && rowElement(main, rows[b.first]!)
           return element ? element.getBoundingClientRect().top - main.getBoundingClientRect().top > 40 : false
@@ -354,7 +359,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         updateReview(current, (prev) => ({ ...prev, verdict: null, reason: undefined }))
         return true
       case "n":
-        if (!cursor || !model) return true
+        if (!cursor || !model) {
+          setPrompt("prNote")
+          return true
+        }
         if (isCollapsed(cursor.file)) toggleFold(model.files[cursor.file]!.name)
         openDraft(model.files[cursor.file]!.name, cursor.side, cursor.line)
         return true
@@ -369,8 +377,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         return true
       }
       case "z":
-        scrollIntent.current = "reset"
-        setCursors((prev) => ({ ...prev, [current]: 0 }))
+        scrollIntent.current = "top"
+        setCursors((prev) => ({ ...prev, [current]: HEADER }))
         setIgnoreWhitespace((value) => !value)
         return true
       case "o":
