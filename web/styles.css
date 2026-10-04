@@ -538,14 +538,20 @@ kbd {
   padding: 0 16px 0 var(--pad);
   border-bottom: 1px solid var(--border);
   background: var(--band);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms var(--ease);
+  visibility: hidden;
 }
 
+.pr-bar-end {
+  height: 0;
+}
+
+/* The band itself appears at once and stays opaque; only its contents ease in. */
 .pr-sticky.is-on {
-  opacity: 1;
-  pointer-events: auto;
+  visibility: visible;
+}
+
+.pr-sticky.is-on > * {
+  animation: fade-in 120ms var(--ease);
 }
 
 .pr-sticky .pr-num {
@@ -609,8 +615,8 @@ kbd {
   color: var(--reject);
 }
 
-.pr-bar + .files > .file:first-child,
-.pr-bar + .large-hint + .files > .file:first-child {
+.pr-bar-end + .files > .file:first-child,
+.pr-bar-end + .large-hint + .files > .file:first-child {
   border-top: 0;
 }
 

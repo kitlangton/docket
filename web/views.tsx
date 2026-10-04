@@ -254,6 +254,7 @@ export function PrHeader(props: {
           {counts ?? <Skeleton width={160} />}
         </div>
       </header>
+      <div className="pr-bar-end" aria-hidden />
     </>
   )
 }
