@@ -1,52 +1,122 @@
 # docket
 
-A local, keyboard-first review docket for a batch of pull requests.
+Review a batch of pull requests or local branches in the browser with Vim keys, then hand your verdicts back to the agent that asked.
 
-An agent (or you) puts PRs on the docket: a curated manifest of ordered groups, a list of PR numbers, a `gh pr list` query, or a local branch. A browser tab opens, and you work through every item with Vim-style keys. Leave notes, then approve, reject, or skip each one; each verdict moves you to the next undecided item. When you hand back, docket writes `verdicts.json`, prints a summary, and exits, so an agent running it in the background is notified.
+![docket](docs/demo.gif)
 
-docket reads diffs from your local git checkout and metadata from `gh`. It never writes to GitHub.
+docket reads diffs from your local git checkout (and PR metadata from `gh`). It never writes to GitHub.
 
-## Usage
+## Install
+
+Requires [Bun](https://bun.sh) 1.3+ and git; [`gh`](https://cli.github.com) for GitHub PRs.
 
 ```sh
-docket docket.json                        # curated manifest
-docket 52985 52988                        # PR numbers, in this order
-docket --author @me --state open          # anything gh pr list can filter
-docket my-branch                          # local branch against the base it most likely forked from
-docket v2..my-branch                      # explicit range (merge-base diff)
-docket open                               # just open the inbox
-docket server status|stop|restart         # manage the background server
+bun install -g github:kitlangton/docket
 ```
 
-The repository is the current directory's checkout unless `--repo <path>` is given (a manifest uses its `repo.path`); the GitHub repo comes from the `origin` remote.
+## Quick start
 
-| Option          | Description                                     |
-| --------------- | ----------------------------------------------- |
-| `--repo <path>` | Git checkout to use                             |
-| `--out <path>`  | Where to write `verdicts.json`                  |
-| `--port <n>`    | Server port (default: `$DOCKET_PORT` or 4789)    |
-| `--no-open`     | Print the URL without opening a browser         |
-| `--refresh`     | Ignore the PR cache                             |
+From a clone of this repo:
 
-Install with `bun install && bun link`. Requirements: Bun, an authenticated `gh`, and a local clone.
+```sh
+bun examples/demo.ts             # creates ./demo-repo with three branches and a manifest
+docket demo-repo/docket.json     # opens http://docket.localhost:4789
+```
 
-docket prints its URL immediately. It exits 0 when you hand back (`w` or `:w`), printing one line per item and the verdicts path, or on Ctrl-C, printing `closed without hand-back` and the state path.
+Other ways to start a session, from inside a checkout:
 
-## One server, one inbox
+```sh
+docket 123 456                   # GitHub PR numbers, in this order
+docket --author @me --state open # anything gh pr list can filter
+docket my-branch                 # a local branch against the base it forked from
+docket main..my-branch           # an explicit range
+docket open                      # the inbox
+docket server status|stop|restart
+```
 
-Every session lives in a single background server at **http://docket.localhost:4789** (bound to 127.0.0.1; Chromium resolves `*.localhost` itself). `docket <args>` is a client: it starts the server if none answers on the port, registers the session, opens `/s/<session>` (or points an already open docket tab at it instead), and then waits on the session's event stream until you hand it back. Ctrl-C only stops the client; the session stays in the server, so you can still finish it.
+| Option          | Description                                   |
+| --------------- | --------------------------------------------- |
+| `--repo <path>` | Git checkout to use (default: current dir)    |
+| `--out <path>`  | Where to write `verdicts.json`                |
+| `--port <n>`    | Server port (default: `$DOCKET_PORT` or 4789) |
+| `--no-open`     | Don't open a browser                          |
+| `--refresh`     | Ignore the PR cache                           |
 
-The home page, `/`, is an inbox of every session: **Waiting on you** (a client is waiting for the hand-back), **In progress**, and **Done**. Move with `j`/`k`, open with `Enter`, archive with `d`, and get back to it from a session with `g h` or the **Inbox** link above the rail. Registering the same session again (same manifest, or the same PR numbers or ref from the same checkout) attaches to it; every client waiting on a session receives its hand-back.
+Move with `j`/`k`, comment with `c` (or `V` then `c` on lines), decide with `a`/`r`/`s`, and hand back with `w` on the summary. `?` lists every key.
 
-The server identifies itself at `/api/health` with its version (package version plus a hash of the source). A client running different code restarts the server: it lets open tabs save, finishes in-flight writes, and starts the new build; tabs reload onto it and waiting clients reconnect. The server stops after 30 minutes with no open tabs and no waiting clients (`--idle-ms` or `DOCKET_IDLE_MS` to change that); its log is `~/.local/share/docket/.server/server.log`. If [`portless`](https://github.com/vercel-labs/portless) is on your `PATH`, the server also registers `https://docket.localhost` and uses that URL.
+## With an agent
 
-For each PR, docket runs `gh pr view`, fetches `pull/N/head` and the base branches in one `git fetch`, and diffs the head against its merge base. If git fails it falls back to `gh pr diff`. PR data is cached under `~/.cache/docket`, so reopening is instant; a background refresh picks up new pushes.
+1. The agent writes a manifest: the PRs in review order, each with a one-line reason.
+2. It runs `docket manifest.json` in the background. The command prints a URL and blocks.
+3. You review and hand back. docket writes `verdicts.json`, prints a summary and its path, and exits 0. Ctrl-C also exits 0 and leaves the session open in the inbox.
+4. The agent reads `verdicts.json` and acts: merge approvals, close rejections, answer notes.
 
-Progress is saved continuously, so a reload or restart resumes where you were. A manifest session keeps `<name>.state.json` and `verdicts.json` next to the manifest; ad-hoc sessions keep them, along with the generated `session.json`, in `~/.local/share/docket/<slug>/`.
+[`skill/SKILL.md`](skill/SKILL.md) is a ready-made instruction file for coding agents.
+
+### Manifest
+
+```json
+{
+  "title": "Cart cleanup",
+  "summary": "Optional context for the batch.",
+  "repo": { "path": ".", "github": "owner/repo" },
+  "groups": [
+    {
+      "title": "Behavior",
+      "why": "Optional; shown under the group in the summary and on hover.",
+      "prs": [
+        { "number": 101, "why": "What it does, and the evidence that it is right.", "confidence": "high" },
+        {
+          "number": 102,
+          "why": "…",
+          "after": [101],
+          "focus": ["src/cart.ts"],
+          "confidence": "medium",
+          "risk": "What could go wrong."
+        },
+        { "ref": "main..my-branch", "why": "Local work that isn't on GitHub." }
+      ]
+    }
+  ]
+}
+```
+
+- `repo.path` is relative to the manifest. `repo.github` defaults to the `origin` remote; it is only needed for `number` items.
+- `after`: PRs this one stacks on. `focus`: files listed first.
+- `confidence`: `high`, `medium`, or `low`. docket adds a size from the diff: **S** ≤ 50 lines and ≤ 3 files, **L** > 400 lines or > 15 files, otherwise **M**.
+- Descriptions, `why`, and `risk` are Markdown.
+
+### verdicts.json
+
+```json
+{
+  "session": "/abs/path/docket.json",
+  "reviewedAt": "2026-10-03T20:15:00.000Z",
+  "prs": [
+    {
+      "number": 102,
+      "title": "fix(cart): clamp discounts",
+      "confidence": "medium",
+      "size": "S",
+      "verdict": "reject",
+      "reason": "Depends on #101",
+      "reviewedHead": "4f1c…",
+      "currentHead": "4f1c…",
+      "notes": [
+        { "body": "Is 100% still valid?" },
+        { "path": "src/cart.ts", "side": "RIGHT", "line": 14, "body": "Clamp here?" },
+        { "path": "src/cart.ts", "side": "RIGHT", "startLine": 10, "line": 14, "body": "This block" }
+      ]
+    }
+  ]
+}
+```
+
+Every item appears in manifest order, with `number` or `ref`. `verdict` is `approve`, `reject`, `skip`, or `null`. A note without `path` is about the whole PR. Line notes use GitHub's review-comment convention: `RIGHT` is the head's line numbers, `LEFT` the base's, and `startLine` appears only for ranges. `reviewedHead` differing from `currentHead` means commits landed after the verdict.
 
 ## Keys
 
-The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which also drives key handling and the `?` overlay; run `bun run keys` after changing it.
+Generated from `web/keymap.ts`, which also drives key handling and the `?` overlay.
 
 <!-- keys:start -->
 | Keys | Action |
@@ -122,75 +192,37 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `d` | Archive a session that isn't waiting _(home)_ |
 <!-- keys:end -->
 
-Sequences like `gg`, `]c`, and `zz` are typed one key after another; a bare `]` or `[` runs after a short pause (about 400 ms) if no `c` follows. Bindings marked "(count)" take a count prefix such as `3j`, `2]`, or `5J`; `10G` goes to line 10 of the current file. The status bar shows a pending count or key while you type.
+Sequences (`gg`, `]c`, `zz`) are typed in order; a bare `]` or `[` runs after about 400 ms. "(count)" bindings take a count, like `3j` or `2]`; `10G` goes to line 10 of the current file.
 
-`:` opens a command line: `:w` (or `:wq`, `ZZ`) hands back and exits, `:q` closes without handing back (asking first if you have verdicts; `:q!` skips the question), `:s` or `:summary` opens the summary, `:52987` jumps to that PR (or `:3` to the third), and `:set wrap` / `:set nowrap` (or `:set wrap!`) toggles line wrapping. `C-o` and `C-i`/`Tab` walk the jumplist of big jumps: `gg`, `G`, the file palette, PR switches, and `:N`. `u` and `C-r` undo and redo verdicts given in this session.
+`:` commands: `:w`/`:wq`/`ZZ` hand back, `:q` closes without handing back (`:q!` skips the confirmation), `:s` opens the summary, `:52987` or `:3` jumps to a PR, and `:set wrap`/`:set nowrap` toggle wrapping.
 
-PR notes are listed under the header. From the header, `j`/`k` step through them; `e` (or `Enter`) edits the focused note, `d` deletes it, and `Esc` leaves. In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels; saving an empty note deletes it.
+## How it works
 
-Changes with more than 30 files or 3,000 diff lines open with every file folded (except `focus` files), so even very large PRs render instantly; use `f`, `o`, and `x` to work through them.
+- **One server.** Sessions live in a single background server at `http://docket.localhost:4789`, bound to 127.0.0.1 (browsers resolve `*.localhost` locally). `docket <args>` starts it if needed, registers the session, opens its tab (or reuses an open docket tab), and waits on the session's event stream. Registering the same session again attaches to it.
+- **Inbox.** `/` lists sessions waiting on you, in progress, and done.
+- **Upgrades.** The server reports a version built from the package version and a hash of the source. A client running different code restarts it; open tabs save, reload, and reconnect.
+- **Idle.** The server exits after 30 minutes with no open tabs and no waiting clients (`DOCKET_IDLE_MS`).
+- **Data.** Session state and verdicts live next to a manifest, or in `~/.local/share/docket/<slug>/` for ad-hoc sessions. GitHub PR data is cached in `~/.cache/docket`. The server log is `~/.local/share/docket/.server/server.log`.
+- **portless.** If [`portless`](https://github.com/vercel-labs/portless) is on `PATH`, the server also registers `https://docket.localhost`.
+- **Diffs.** PRs are diffed against their merge base with local git (fetching `pull/N/head` once), falling back to `gh pr diff`. Expanding context reads full files with `git show`. Sessions open in a tab refresh every minute; PRs with new commits since your verdict are marked, and `i` shows only what changed.
 
-With the mouse, drag across line numbers to select a range and click **Comment**, click a line to move the cursor there, click a file header to fold it, and click any note to edit it.
+## Development
 
-## Session manifest
-
-```jsonc
-{
-  "title": "packages/tui dead-code cleanup",
-  "repo": { "path": "/path/to/clone", "github": "owner/repo", "base": "main" },
-  "summary": "Optional context for the whole session.",
-  "groups": [
-    {
-      "title": "Theme",
-      "why": "Optional group context, shown under each PR's why.",
-      "prs": [
-        { "number": 101, "why": "One line on what this PR does and why.", "confidence": "high" },
-        {
-          "number": 102,
-          "why": "…",
-          "after": [101],
-          "focus": ["src/theme/v1.ts"],
-          "confidence": "medium",
-          "risk": "Safe only if nothing reaches generateSyntax dynamically."
-        }
-      ]
-    }
-  ]
-}
+```sh
+bun install
+bun run typecheck   # tsc and the README key table
+bun run test        # unit tests
+bunx playwright install chromium
+bun run e2e         # end-to-end tests against throwaway git repos
+bun run keys        # regenerate the README key table
 ```
 
-- `after`: PRs this one stacks on. They're shown as hints next to the PR, along with their verdicts.
-- `focus`: files to review first. They're listed first and highlighted.
-- `confidence`: `"high"`, `"medium"`, or `"low"`: how sure the author is. Shown as a three-bar meter in the rail, the PR bar, and the summary.
-- `risk`: one line on what could go wrong, shown under the PR's description and next to approvals in the summary.
-- An item may use `"ref": "base..head"` instead of `number` for local work.
+The end-to-end tests run each case on its own port with temporary data and cache directories, so they don't touch a running docket.
 
-docket computes each item's size from its diff: **S** is at most 50 changed lines and 3 files, **L** is more than 400 lines or 15 files, and **M** is everything between.
+## Credits
 
-## verdicts.json
+Diffs are rendered with [`@pierre/diffs`](https://diffs.com) (Apache-2.0). The UI uses the [Geist](https://vercel.com/font) fonts (SIL Open Font License 1.1; see `web/fonts/LICENSE-Geist.txt`).
 
-```json
-{
-  "session": "/abs/path/docket.json",
-  "reviewedAt": "2026-10-03T20:15:00.000Z",
-  "prs": [
-    {
-      "number": 102,
-      "title": "refactor(theme): remove v1 syntax generation",
-      "confidence": "medium",
-      "size": "L",
-      "verdict": "reject",
-      "reason": "Depends on #101 landing first",
-      "notes": [
-        { "body": "Is generateSyntax covered by tests?" },
-        { "path": "src/theme/v1.ts", "side": "LEFT", "line": 74, "body": "Still referenced?" },
-        { "path": "src/theme/v1.ts", "side": "RIGHT", "startLine": 10, "line": 14, "body": "This block can go" }
-      ]
-    }
-  ]
-}
-```
+## License
 
-Every item in the session appears, in order. Pull requests have `number`; local refs have `ref` instead. `confidence` is copied from the manifest when present; `size` is docket's S/M/L. `verdict` is `"approve"`, `"reject"`, `"skip"`, or `null` if the item was not reviewed. A note without `path` is about the whole PR. Line notes follow GitHub's review comment convention: `RIGHT` uses the head's line numbers (added and context lines), `LEFT` uses the base's (deleted lines), and `startLine` is present only for multi-line ranges.
-
-State files written by older versions (with `prNote`) are migrated on load.
+MIT
