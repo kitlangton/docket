@@ -1,28 +1,11 @@
 import { manifestItems } from "./load"
-import { itemId, sizeOf, type ItemLoad, type Manifest, type Note, type PrReview, type ReviewState, type VerdictsFile } from "./types"
+import { itemId, sizeOf, type ItemLoad, type Manifest, type ReviewState, type VerdictsFile } from "./types"
 
-type LegacyReview = Partial<PrReview> & { prNote?: string }
-export type LegacyState = { version?: number; current?: string | number | null; reviews?: Record<string, LegacyReview> }
-
-/** Reads review state, upgrading files written before PR notes joined the notes list. */
+/** Reads review state; a session without a state file starts empty. */
 export async function readState(path: string): Promise<ReviewState> {
   const file = Bun.file(path)
   if (!(await file.exists())) return { version: 2, current: null, reviews: {} }
-  return migrateState(await file.json())
-}
-
-/** Upgrades a raw state file: PR notes once lived in `prNote`, and `current` was once a number. */
-export function migrateState(raw: LegacyState): ReviewState {
-  const reviews = Object.fromEntries(
-    Object.entries(raw.reviews ?? {}).map(([id, review]): [string, PrReview] => {
-      const notes: Note[] = [...(review.prNote ? [{ id: crypto.randomUUID(), body: review.prNote }] : []), ...(review.notes ?? [])]
-      return [
-        id,
-        { verdict: review.verdict ?? null, reason: review.reason, notes, viewed: review.viewed, reviewedHead: review.reviewedHead },
-      ]
-    }),
-  )
-  return { version: 2, current: raw.current === null || raw.current === undefined ? null : String(raw.current), reviews }
+  return file.json()
 }
 
 export function toVerdicts(sessionPath: string, manifest: Manifest, items: Record<string, ItemLoad>, state: ReviewState): VerdictsFile {

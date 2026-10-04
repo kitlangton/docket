@@ -1,15 +1,15 @@
 import { spawn } from "node:child_process"
 import { mkdir, open } from "node:fs/promises"
 import { join } from "node:path"
-import { APP_ID, type Registration, type WaitEvent } from "./server"
 import { dataHome } from "./session"
+import { APP_ID, type Registration, type WaitEvent } from "./types"
 import { ROOT } from "./version"
 
-export type Health = { app: string; version: string; pid: number; port: number; url: string }
+type Health = { app: string; version: string; pid: number; port: number; url: string }
 
 export const DEFAULT_PORT = 4789
 
-export function serverBase(port: number) {
+function serverBase(port: number) {
   return `http://127.0.0.1:${port}`
 }
 
@@ -31,11 +31,11 @@ export async function health(port: number): Promise<Health | undefined> {
  * code is restarted first; without it, any docket server is accepted (used when reconnecting, so two
  * clients on different builds never take turns restarting each other).
  */
-export async function ensureServer(port: number, options: { version?: string; idleMs?: number } = {}) {
+export async function ensureServer(port: number, options: { version?: string } = {}) {
   const running = await health(port)
   if (running && (!options.version || running.version === options.version)) return running
   if (running) await stopServer(port)
-  await spawnServer(port, options.idleMs)
+  await spawnServer(port)
   const started = await waitFor(port, (found) => found !== undefined, 20_000, "the docket server did not start; see " + logPath())
   // Open tabs reload onto the new build; give them a moment to reconnect so they can be reused.
   if (running) await Bun.sleep(2500)
@@ -50,10 +50,10 @@ export async function stopServer(port: number) {
   return true
 }
 
-async function spawnServer(port: number, idleMs?: number) {
+async function spawnServer(port: number) {
   await mkdir(join(dataHome(), ".server"), { recursive: true })
   const log = await open(logPath(), "a")
-  const args = [join(ROOT, "bin", "docket.ts"), "server", "run", "--port", String(port), ...(idleMs ? ["--idle-ms", String(idleMs)] : [])]
+  const args = [join(ROOT, "bin", "docket.ts"), "server", "run", "--port", String(port)]
   const child = spawn(process.execPath, args, { detached: true, stdio: ["ignore", log.fd, log.fd], cwd: ROOT, env: process.env })
   child.unref()
   await log.close()
@@ -77,8 +77,8 @@ export async function register(port: number, registration: Registration) {
 }
 
 /** Waits on the session's event stream. Resolves with the final event, or `undefined` if the stream dropped. */
-export async function waitOnce(port: number, id: string, signal: AbortSignal): Promise<WaitEvent | undefined> {
-  const res = await fetch(`${serverBase(port)}/api/s/${encodeURIComponent(id)}/wait`, { signal }).catch(() => undefined)
+export async function waitOnce(port: number, id: string): Promise<WaitEvent | undefined> {
+  const res = await fetch(`${serverBase(port)}/api/s/${encodeURIComponent(id)}/wait`).catch(() => undefined)
   if (!res?.ok || !res.body) return undefined
   const decoder = new TextDecoder()
   const buffer = { text: "" }

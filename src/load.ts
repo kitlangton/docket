@@ -1,67 +1,57 @@
-import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { writeAtomic } from "./files"
 import { itemId, type ItemData, type ItemLoad, type ItemMeta, type Manifest, type ManifestItem } from "./types"
 
-const META_FIELDS = "number,title,body,headRefName,headRefOid,baseRefName,url,state,additions,deletions,changedFiles"
+const META_FIELDS = "number,title,body,headRefOid,baseRefName,url,state,additions,deletions,changedFiles"
 const CONCURRENCY = 6
 const MAX_PATCH_BYTES = 30_000_000
 
-type GhPr = Omit<ItemMeta, "id" | "number" | "ref" | "commits"> & { number: number }
-
-export type LoadEvents = {
-  phase: (phase: string) => void
-  loaded: (load: ItemLoad) => void
-}
+type GhPr = Omit<ItemMeta, "id" | "number" | "commits"> & { number: number }
 
 export function manifestItems(manifest: Manifest) {
   return manifest.groups.flatMap((group) => group.prs)
 }
 
-/** Returns cached data for every pull request that has a cache entry. Local refs are never cached. */
+/** Returns cached data for every pull request that has a readable cache entry. Local refs are never cached. */
 export async function readCache(manifest: Manifest) {
   const entries = await Promise.all(
     manifestItems(manifest).map(async (item) => {
       if (item.number === undefined || !manifest.repo.github) return undefined
-      const file = Bun.file(cachePath(manifest.repo.github, item.number))
+      const path = cachePath(manifest.repo.github, item.number)
+      const file = Bun.file(path)
       if (!(await file.exists())) return undefined
-      const data: ItemData = await file.json()
-      return data
+      return (file.json() as Promise<ItemData>).catch((error: unknown) => {
+        console.error(`docket: skipping unreadable cache file ${path}: ${error}`)
+        return undefined
+      })
     }),
   )
   return entries.filter((entry) => entry !== undefined)
 }
 
 /** Loads metadata and diffs for every item, writing the cache for pull requests as it goes. */
-export async function loadAll(manifest: Manifest, events: LoadEvents) {
+export async function loadAll(manifest: Manifest, loaded: (load: ItemLoad) => void) {
   const items = manifestItems(manifest)
   const refs = items.filter((item) => item.number === undefined)
   const numbers = items.flatMap((item) => (item.number === undefined ? [] : [item.number]))
 
-  await mapBounded(refs, CONCURRENCY, async (item) =>
-    events.loaded(await loadRef(manifest, item).catch((error: unknown) => failed(item, error))),
-  )
-  if (!numbers.length) return events.phase("Ready")
+  await mapBounded(refs, CONCURRENCY, async (item) => loaded(await loadRef(manifest, item).catch((error: unknown) => failed(item, error))))
+  if (!numbers.length) return
 
-  events.phase("Reading PR metadata")
   const metas = await mapBounded(numbers, CONCURRENCY, (number) =>
     viewPr(manifest, number).catch((error: unknown) => {
-      events.loaded(failed({ number }, error))
+      loaded(failed({ number }, error))
       return undefined
     }),
   )
   const ok = metas.filter((meta) => meta !== undefined)
-
-  events.phase("Fetching refs")
   const fetched = await fetchRefs(manifest, ok)
-
-  events.phase("Computing diffs")
   await mapBounded(ok, CONCURRENCY, async (meta) => {
     const load = await diffPr(manifest, meta, fetched).catch((error: unknown) => failed({ number: meta.number }, error))
     if (load.ok && manifest.repo.github) await writeCache(manifest.repo.github, load.data)
-    events.loaded(load)
+    loaded(load)
   })
-  events.phase("Ready")
 }
 
 function failed(item: ManifestItem, error: unknown): ItemLoad {
@@ -89,12 +79,12 @@ async function diffPr(manifest: Manifest, meta: ItemMeta, fetched: boolean): Pro
   const base = await mergeBase(manifest, `origin/${meta.baseRefName}`, meta.headRefOid).catch(() => "")
   if (!base) return diffFromGh(manifest, meta)
   const [patch, patchIgnoreWhitespace] = await diffPair(manifest, base, meta.headRefOid)
-  return { ok: true, data: { meta: { ...meta, baseOid: base }, patch, patchIgnoreWhitespace, source: "git" } }
+  return { ok: true, data: { meta: { ...meta, baseOid: base }, patch, patchIgnoreWhitespace } }
 }
 
 async function diffFromGh(manifest: Manifest, meta: ItemMeta): Promise<ItemLoad> {
   const patch = await run(["gh", "pr", "diff", String(meta.number), "--repo", requireGithub(manifest)])
-  return { ok: true, data: { meta, patch, patchIgnoreWhitespace: patch, source: "gh" } }
+  return { ok: true, data: { meta, patch, patchIgnoreWhitespace: patch } }
 }
 
 /** Diffs a local ref against its merge base: `head` alone uses the repo's default base. */
@@ -104,11 +94,8 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
   const base = baseSpec || "HEAD"
   const head = headSpec || "HEAD"
   const [headOid, mb] = await Promise.all([revParse(manifest, head), mergeBase(manifest, base, head)])
-  const [[patch, patchIgnoreWhitespace], branch, message, commits, numstat] = await Promise.all([
+  const [[patch, patchIgnoreWhitespace], message, commits, numstat] = await Promise.all([
     diffPair(manifest, mb, headOid),
-    run([...git(manifest), "rev-parse", "--abbrev-ref", head])
-      .then((out) => out.trim())
-      .catch(() => ""),
     run([...git(manifest), "log", "-1", "--format=%s%x00%b", headOid]).catch(() => ""),
     run([...git(manifest), "rev-list", "--count", `${mb}..${headOid}`]).then((out) => Number(out.trim())),
     run([...git(manifest), "diff", "--numstat", "-M", mb, headOid]),
@@ -119,16 +106,13 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
     .split("\n")
     .filter(Boolean)
     .map((line) => line.split("\t").map(Number))
-  const isBranch = branch && branch !== "HEAD" && !/^[0-9a-f]{7,40}$/.test(head)
   const [subject = "", body = ""] = message.split("\0").map((part) => part.trim())
   const meta: ItemMeta = {
     id: itemId(item),
-    ref: spec,
     // The head commit's subject; the ref itself only when there is none.
     title: subject || spec,
     titleIsRef: !subject,
     body,
-    headRefName: isBranch ? branch : head,
     headRefOid: headOid,
     baseOid: mb,
     baseRefName: base,
@@ -138,14 +122,14 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
     changedFiles: stats.length,
     commits,
   }
-  return { ok: true, data: { meta, patch, patchIgnoreWhitespace, source: "git" } }
+  return { ok: true, data: { meta, patch, patchIgnoreWhitespace } }
 }
 
 /**
  * Picks the base a local ref most likely branched from: among the remote's default branch and
  * conventionally named trunk branches, the one leaving the fewest commits on the ref.
  */
-export async function defaultBase(manifest: Manifest, head = "HEAD") {
+async function defaultBase(manifest: Manifest, head: string) {
   if (manifest.repo.base) return `origin/${manifest.repo.base}`
   const [originHead, refs] = await Promise.all([
     run([...git(manifest), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
@@ -221,9 +205,8 @@ function cachePath(github: string, number: number) {
   return join(cacheDir(github), `${number}.json`)
 }
 
-async function writeCache(github: string, data: ItemData) {
-  await mkdir(cacheDir(github), { recursive: true })
-  await Bun.write(cachePath(github, Number(data.meta.id)), JSON.stringify(data))
+function writeCache(github: string, data: ItemData) {
+  return writeAtomic(cachePath(github, Number(data.meta.id)), JSON.stringify(data))
 }
 
 /**

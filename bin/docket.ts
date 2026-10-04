@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util"
 import { DEFAULT_PORT, ensureServer, health, logPath, parentName, register, stopServer, waitOnce } from "../src/client"
-import { resolveSession, type Session } from "../src/session"
-import type { VerdictsFile } from "../src/types"
+import { resolveSession } from "../src/session"
+import type { Registration, Session, VerdictsFile } from "../src/types"
 import { buildVersion } from "../src/version"
 
 const USAGE = `docket: review a queue of PRs in the browser, then hand back verdicts.
@@ -37,7 +37,6 @@ const args = parseArgs({
     author: { type: "string" },
     label: { type: "string" },
     state: { type: "string" },
-    "idle-ms": { type: "string" },
     open: { type: "boolean", default: true },
     refresh: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
@@ -45,7 +44,6 @@ const args = parseArgs({
 })
 
 const port = Number(args.values.port ?? process.env.DOCKET_PORT ?? DEFAULT_PORT)
-const idleMs = Number(args.values["idle-ms"] ?? process.env.DOCKET_IDLE_MS ?? 30 * 60_000)
 const [command, subcommand] = args.positionals
 
 if (args.values.help) {
@@ -67,28 +65,26 @@ async function review() {
     buildVersion(),
     parentName(),
   ])
-  await ensureServer(port, { version, idleMs }).catch(fail)
+  await ensureServer(port, { version }).catch(fail)
   const registration = { session, cwd: process.cwd(), agent, refresh: args.values.refresh }
   const registered = await register(port, registration).catch(fail)
   console.log(`docket ${registered.url}`)
   console.log(`  state ${session.statePath}`)
   if (args.values.open && !registered.focused) Bun.spawn(["open", registered.url], { stdout: "ignore", stderr: "ignore" })
 
-  const abort = new AbortController()
   const close = () => {
-    abort.abort()
     console.log(`docket: closed without hand-back; progress saved in ${session.statePath}`)
     process.exit(0)
   }
   process.on("SIGINT", close)
   process.on("SIGTERM", close)
-  await waitForHandback(session, registration, abort.signal)
+  await waitForHandback(session, registration)
 }
 
 /** Blocks until the session is handed back or closed, reconnecting (and restarting the server) if it goes away. */
-async function waitForHandback(session: Session, registration: Parameters<typeof register>[1], signal: AbortSignal) {
+async function waitForHandback(session: Session, registration: Registration) {
   for (;;) {
-    const event = await waitOnce(port, session.id, signal)
+    const event = await waitOnce(port, session.id)
     if (event?.type === "handback") {
       console.log(summarize(event.verdicts))
       console.log(`verdicts: ${event.outPath}`)
@@ -99,13 +95,13 @@ async function waitForHandback(session: Session, registration: Parameters<typeof
       process.exit(0)
     }
     await Bun.sleep(500)
-    const running = await ensureServer(port, { idleMs }).catch(() => undefined)
+    const running = await ensureServer(port).catch(() => undefined)
     if (running) await register(port, { ...registration, refresh: false }).catch(() => undefined)
   }
 }
 
 async function openInbox() {
-  const running = await ensureServer(port, { version: await buildVersion(), idleMs }).catch(fail)
+  const running = await ensureServer(port, { version: await buildVersion() }).catch(fail)
   console.log(`docket ${running.url}`)
   if (args.values.open) Bun.spawn(["open", running.url], { stdout: "ignore", stderr: "ignore" })
 }
@@ -113,7 +109,7 @@ async function openInbox() {
 async function serverCommand(action: string | undefined) {
   if (action === "run") {
     const { serve } = await import("../src/server")
-    const started = await serve({ port, version: await buildVersion(), idleMs })
+    const started = await serve({ port, version: await buildVersion() })
     console.log(`docket server ${started.url} (pid ${process.pid})`)
     return
   }
@@ -136,7 +132,7 @@ async function serverCommand(action: string | undefined) {
   }
   if (action === "restart") {
     await stopServer(port).catch(fail)
-    const running = await ensureServer(port, { version: await buildVersion(), idleMs }).catch(fail)
+    const running = await ensureServer(port, { version: await buildVersion() }).catch(fail)
     console.log(`docket server ${running.url} (pid ${running.pid})`)
     return
   }

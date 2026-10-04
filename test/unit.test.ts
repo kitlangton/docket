@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { slug } from "../src/session"
-import { migrateState, toVerdicts } from "../src/state"
+import { toVerdicts } from "../src/state"
 import { sizeOf, type ItemLoad, type Manifest, type ReviewState } from "../src/types"
 import { feed, GROUPS, KEYMAP, readmeTable, type Mode } from "../web/keymap"
 import { renderMarkdown } from "../web/markdown"
@@ -93,12 +93,6 @@ describe("titles and labels", () => {
 })
 
 describe("state and verdicts", () => {
-  test("migrates legacy prNote and numeric current", () => {
-    const state = migrateState({ current: 12, reviews: { "12": { verdict: "approve", prNote: "old", notes: [] } } })
-    expect(state.current).toBe("12")
-    expect(state.reviews["12"]!.notes).toEqual([expect.objectContaining({ body: "old" })])
-  })
-
   test("builds verdicts with GitHub sides and heads", () => {
     const manifest: Manifest = {
       title: "t",
@@ -113,7 +107,6 @@ describe("state and verdicts", () => {
             id: "1",
             title: "One",
             body: "",
-            headRefName: "h",
             headRefOid: "abc",
             baseRefName: "main",
             state: "OPEN",
@@ -123,7 +116,6 @@ describe("state and verdicts", () => {
           },
           patch: "",
           patchIgnoreWhitespace: "",
-          source: "git",
         },
       },
     }

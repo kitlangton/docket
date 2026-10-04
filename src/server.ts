@@ -2,35 +2,27 @@ import { mkdir } from "node:fs/promises"
 import { basename, join } from "node:path"
 import index from "../web/index.html"
 import { baseFor, fileAt, interdiff, loadAll, manifestItems, readCache } from "./load"
-import { dataHome, type Session } from "./session"
+import { dataHome } from "./session"
 import { readState, toVerdicts } from "./state"
 import {
+  APP_ID,
   itemId,
   type InboxEntry,
   type ItemLoad,
-  type Progress,
+  type Manifest,
+  type Registration,
   type ReviewState,
   type ServerEvent,
+  type Session,
   type SessionPayload,
-  type VerdictsFile,
+  type WaitEvent,
 } from "./types"
 
-export const APP_ID = "docket"
 const REFRESH_MS = Number(process.env.DOCKET_REFRESH_MS ?? 60_000)
+/** Exit after this long with no connected tabs and no waiting clients. */
+const IDLE_MS = Number(process.env.DOCKET_IDLE_MS ?? 30 * 60_000)
 
-export type ServerOptions = {
-  port: number
-  version: string
-  /** Exit after this long with no connected tabs and no waiting clients. */
-  idleMs: number
-}
-
-/** What `docket <args>` sends to register a session. */
-export type Registration = { session: Session; cwd?: string; agent?: string; refresh?: boolean }
-
-/** Events a waiting client receives on /api/s/:id/wait. */
-export type WaitEvent =
-  { type: "hello"; version: string } | { type: "handback"; verdicts: VerdictsFile; outPath: string } | { type: "closed"; statePath: string }
+type ServerOptions = { port: number; version: string }
 
 type Entry = {
   session: Session
@@ -43,7 +35,6 @@ type Entry = {
 
 type Runtime = {
   items: Record<string, ItemLoad>
-  progress: Progress
   version: number
   /** Reloads every item, or only local refs, picking up new commits. */
   refresh: (only?: "local") => void
@@ -53,7 +44,9 @@ type Stream = { send: (data: unknown) => void; close: () => void }
 
 /** One long-lived server for every session: the inbox, each session's data and state, and the waiting clients. */
 export async function serve(options: ServerOptions) {
-  const indexPath = join(dataHome(), ".server", "sessions.json")
+  const serverDir = join(dataHome(), ".server")
+  await mkdir(serverDir, { recursive: true })
+  const indexPath = join(serverDir, "sessions.json")
   const entries = await readIndex(indexPath)
   const runtimes = new Map<string, Runtime>()
   const waiters = new Map<string, Set<Stream>>()
@@ -68,21 +61,17 @@ export async function serve(options: ServerOptions) {
     return promise
   }
   const write = (path: string, data: string) => track(Bun.write(path, data))
-  const saveIndex = () =>
-    track(mkdir(join(dataHome(), ".server"), { recursive: true }).then(() => Bun.write(indexPath, JSON.stringify(entries, null, 2))))
+  const saveIndex = () => write(indexPath, JSON.stringify(entries, null, 2))
 
   const broadcast = (event: ServerEvent) => tabs.forEach((tab) => tab.send(event))
-  const busy = () => tabs.size > 0 || [...waiters.values()].some((set) => set.size > 0)
-  const touchIdle = () => {
-    idle.since = busy() ? Number.POSITIVE_INFINITY : Date.now()
-  }
+  const busy = () => tabs.size > 0 || waiters.size > 0
 
   const runtime = (id: string, refresh = false) => {
     const existing = runtimes.get(id)
     const entry = entries[id]
     if (existing && !refresh) return existing
     if (!entry) return undefined
-    const fresh = startRuntime(entry.session, refresh, (version) => broadcast({ type: "session", id, version }))
+    const fresh = startRuntime(entry.session.manifest, refresh, (version) => broadcast({ type: "session", id, version }))
     runtimes.set(id, fresh)
     return fresh
   }
@@ -93,7 +82,6 @@ export async function serve(options: ServerOptions) {
       waiter.close()
     })
     waiters.delete(id)
-    touchIdle()
   }
 
   const inbox = async () => {
@@ -151,7 +139,6 @@ export async function serve(options: ServerOptions) {
             cwd: registration.cwd,
             agent: registration.agent,
             registeredAt: new Date().toISOString(),
-            handedBackAt: entries[id]?.handedBackAt,
           }
           await saveIndex()
           runtime(id, registration.refresh)
@@ -171,11 +158,9 @@ export async function serve(options: ServerOptions) {
           return eventStream((stream) => {
             tabs.get(tabId)?.close()
             tabs.set(tabId, { ...stream, at: params.get("at") ?? "/" })
-            touchIdle()
             stream.send({ type: "hello", version: options.version } satisfies ServerEvent)
             return () => {
               if (tabs.get(tabId)?.send === stream.send) tabs.delete(tabId)
-              touchIdle()
             }
           })
         },
@@ -196,11 +181,7 @@ export async function serve(options: ServerOptions) {
           const payload: SessionPayload = {
             id: found.id,
             manifest: found.entry.session.manifest,
-            label: found.entry.session.manifestPath,
-            statePath: found.entry.session.statePath,
             outPath: found.entry.session.outPath,
-            progress: loaded.progress,
-            version: loaded.version,
             items: loaded.items,
           }
           return Response.json(payload)
@@ -228,12 +209,11 @@ export async function serve(options: ServerOptions) {
             const set = waiters.get(found.id) ?? new Set()
             set.add(stream)
             waiters.set(found.id, set)
-            touchIdle()
             broadcast({ type: "inbox" })
             stream.send({ type: "hello", version: options.version } satisfies WaitEvent)
             return () => {
               set.delete(stream)
-              touchIdle()
+              if (!set.size && waiters.get(found.id) === set) waiters.delete(found.id)
               broadcast({ type: "inbox" })
             }
           })
@@ -318,12 +298,12 @@ export async function serve(options: ServerOptions) {
 
   setInterval(
     () => {
-      if (!busy() && Date.now() - idle.since > options.idleMs) {
-        console.log(`docket: idle for ${Math.round(options.idleMs / 1000)}s, shutting down`)
-        shutdown()
-      }
+      if (busy()) idle.since = Date.now()
+      if (Date.now() - idle.since <= IDLE_MS) return
+      console.log(`docket: idle for ${Math.round(IDLE_MS / 1000)}s, shutting down`)
+      shutdown()
     },
-    Math.min(30_000, Math.max(250, options.idleMs / 4)),
+    Math.min(30_000, Math.max(250, IDLE_MS / 4)),
   )
   // Pick up new commits on sessions someone is looking at; local refs also refresh when their tab gains focus.
   setInterval(() => {
@@ -335,9 +315,7 @@ export async function serve(options: ServerOptions) {
   return { server, url: publicUrl }
 }
 
-function startRuntime(session: Session, refresh: boolean, changed: (version: number) => void): Runtime {
-  const manifest = session.manifest
-  const ids = manifestItems(manifest).map(itemId)
+function startRuntime(manifest: Manifest, ignoreCache: boolean, changed: (version: number) => void): Runtime {
   const bump = () => changed(++runtime.version)
   const accept = (load: ItemLoad) => {
     const id = load.ok ? load.data.meta.id : load.id
@@ -348,58 +326,32 @@ function startRuntime(session: Session, refresh: boolean, changed: (version: num
     runtime.items[id] = load
     return true
   }
-  const reloading = { busy: false }
-  const reload = (only?: "local") => {
-    if (reloading.busy) return Promise.resolve()
+  // Busy from the start, so a refresh can't race the first load.
+  const reloading = { busy: true }
+  const load = (only?: "local") => {
     reloading.busy = true
     const groups = only ? [{ title: "local", prs: manifestItems(manifest).filter((item) => item.number === undefined) }] : manifest.groups
-    return loadAll({ ...manifest, groups }, { phase: () => {}, loaded: (load) => accept(load) && bump() })
-      .catch((error) => console.error(`docket: refresh failed: ${error}`))
+    return loadAll({ ...manifest, groups }, (item) => accept(item) && bump())
+      .catch((error) => console.error(`docket: loading ${manifest.title} failed: ${error}`))
       .finally(() => {
         reloading.busy = false
       })
   }
   const runtime: Runtime = {
     items: {},
-    progress: { done: 0, total: ids.length, phase: "Starting" },
     version: 0,
-    refresh: (only) => void reload(only),
+    refresh: (only) => {
+      if (!reloading.busy) void load(only)
+    },
   }
-  const cached = (refresh ? Promise.resolve([]) : readCache(manifest)).then((list) => {
-    list.forEach((data) => {
-      runtime.items[data.meta.id] = { ok: true, data }
+  ;(ignoreCache ? Promise.resolve([]) : readCache(manifest))
+    .then((list) => {
+      list.forEach((data) => {
+        runtime.items[data.meta.id] = { ok: true, data }
+      })
+      bump()
     })
-    runtime.progress.done = list.length
-    const complete = ids.every((id) => runtime.items[id])
-    if (complete) runtime.progress.phase = "Ready"
-    bump()
-    return complete
-  })
-  cached.then((complete) => {
-    reloading.busy = true
-    loadAll(manifest, {
-      phase: (phase) => {
-        if (!complete) runtime.progress.phase = phase
-      },
-      loaded: (load) => {
-        if (!accept(load)) return
-        if (!complete) runtime.progress.done = Object.keys(runtime.items).length
-        bump()
-      },
-    })
-      .then(() => {
-        runtime.progress.phase = "Ready"
-        bump()
-      })
-      .catch((error) => {
-        if (complete) return console.error(`docket: background refresh failed: ${error}`)
-        runtime.progress.phase = `Failed: ${error}`
-        bump()
-      })
-      .finally(() => {
-        reloading.busy = false
-      })
-  })
+    .then(() => load())
   return runtime
 }
 
@@ -411,7 +363,7 @@ async function inboxEntry(id: string, entry: Entry, waiting: number): Promise<In
   const count = (value: string | null) => verdicts.filter((verdict) => verdict === value).length
   const stateFile = Bun.file(entry.session.statePath)
   const touched = (await stateFile.exists()) ? new Date(stateFile.lastModified).toISOString() : entry.registeredAt
-  const done = entry.handedBackAt !== undefined && entry.handedBackAt >= entry.registeredAt
+  const done = entry.handedBackAt !== undefined
   return {
     id,
     title: manifest.title,
@@ -423,9 +375,7 @@ async function inboxEntry(id: string, entry: Entry, waiting: number): Promise<In
     reviewed: order.length - count(null),
     notes: order.reduce((sum, item) => sum + (state.reviews[item]?.notes.length ?? 0), 0),
     counts: { approve: count("approve"), reject: count("reject"), skip: count("skip"), unreviewed: count(null) },
-    registeredAt: entry.registeredAt,
     updatedAt: [entry.registeredAt, touched, entry.handedBackAt ?? ""].sort().at(-1)!,
-    ...(entry.handedBackAt ? { handedBackAt: entry.handedBackAt } : {}),
   }
 }
 

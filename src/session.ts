@@ -2,25 +2,15 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { run } from "./load"
-import type { Manifest, ManifestItem } from "./types"
+import type { Manifest, ManifestItem, Session } from "./types"
 
-export type SessionArgs = {
+type SessionArgs = {
   positionals: string[]
   repo?: string
   out?: string
   author?: string
   label?: string
   state?: string
-}
-
-export type Session = {
-  /** Stable id: registering the same session again attaches to it. */
-  id: string
-  manifest: Manifest
-  /** Path of the manifest on disk; ad-hoc sessions write a generated one. */
-  manifestPath: string
-  statePath: string
-  outPath: string
 }
 
 export async function resolveSession(args: SessionArgs): Promise<Session> {

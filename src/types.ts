@@ -14,7 +14,7 @@ export type ManifestItem = {
 
 export type Confidence = "high" | "medium" | "low"
 
-export type Size = "S" | "M" | "L"
+type Size = "S" | "M" | "L"
 
 /** S: at most 50 changed lines and 3 files. L: more than 400 lines or 15 files. M: everything between. */
 export function sizeOf(meta: { additions: number; deletions: number; changedFiles: number }): Size {
@@ -37,17 +37,15 @@ export type Manifest = {
   groups: ManifestGroup[]
 }
 
-export type ItemState = "OPEN" | "MERGED" | "CLOSED" | "LOCAL"
+type ItemState = "OPEN" | "MERGED" | "CLOSED" | "LOCAL"
 
 export type ItemMeta = {
   id: string
   number?: number
-  ref?: string
   title: string
   /** True when `title` is a git ref, which must be shown verbatim. */
   titleIsRef?: boolean
   body: string
-  headRefName: string
   headRefOid: string
   /** The merge base the diff was taken from. */
   baseOid?: string
@@ -64,7 +62,6 @@ export type ItemData = {
   meta: ItemMeta
   patch: string
   patchIgnoreWhitespace: string
-  source: "git" | "gh"
 }
 
 export type ItemLoad = { ok: true; data: ItemData } | { ok: false; id: string; error: string }
@@ -101,20 +98,14 @@ export type ReviewState = {
   reviews: Record<string, PrReview>
 }
 
-export type Progress = { done: number; total: number; phase: string }
-
 export type SessionPayload = {
   id: string
   manifest: Manifest
-  label: string
-  statePath: string
   outPath: string
-  progress: Progress
-  version: number
   items: Record<string, ItemLoad>
 }
 
-export type VerdictNote = { body: string } | { path: string; side: "LEFT" | "RIGHT"; startLine?: number; line: number; body: string }
+type VerdictNote = { body: string } | { path: string; side: "LEFT" | "RIGHT"; startLine?: number; line: number; body: string }
 
 export type VerdictsFile = {
   session: string
@@ -157,9 +148,7 @@ export type InboxEntry = {
   reviewed: number
   notes: number
   counts: { approve: number; reject: number; skip: number; unreviewed: number }
-  registeredAt: string
   updatedAt: string
-  handedBackAt?: string
 }
 
 /** Server events on /api/events, shared by tabs. */
@@ -169,3 +158,24 @@ export type ServerEvent =
   | { type: "session"; id: string; version: number }
   | { type: "navigate"; id: string }
   | { type: "restart" }
+
+/** A resolved review session: what `docket <args>` registers with the server. */
+export type Session = {
+  /** Stable id: registering the same session again attaches to it. */
+  id: string
+  manifest: Manifest
+  /** Path of the manifest on disk; ad-hoc sessions write a generated one. */
+  manifestPath: string
+  statePath: string
+  outPath: string
+}
+
+/** Identifies a docket server at /api/health, so an unrelated process on the port isn't mistaken for one. */
+export const APP_ID = "docket"
+
+/** What `docket <args>` sends to register a session. */
+export type Registration = { session: Session; cwd?: string; agent?: string; refresh?: boolean }
+
+/** Events a waiting client receives on /api/s/:id/wait. */
+export type WaitEvent =
+  { type: "hello"; version: string } | { type: "handback"; verdicts: VerdictsFile; outPath: string } | { type: "closed"; statePath: string }
