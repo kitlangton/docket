@@ -39,9 +39,6 @@ type Visual = { anchor: number; pill?: { x: number; y: number } }
 // Cursor position above the first change: the PR header, shown at scroll top.
 const HEADER = -1
 
-// Matches `.pr-sticky` height and `--sticky-offset` in styles.css.
-const PINNED_BAR_HEIGHT = 44
-
 function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const session = props.session
   const entries = useMemo(() => toEntries(session.manifest), [session.manifest])
@@ -68,7 +65,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const [handedBack, setHandedBack] = useState<string | null>(null)
   const [folds, setFolds] = useState<Record<string, boolean>>({})
   const [stamped, setStamped] = useState<string | null>(null)
-  const [condensed, setCondensed] = useState(false)
   const mainRef = useRef<HTMLDivElement>(null)
   const scrollIntent = useRef<ScrollIntent>("top")
   const pendingG = useRef(0)
@@ -296,21 +292,15 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     if (marking && cursor.file + 1 < model.files.length) jumpToFile(cursor.file + 1)
   }
 
-  // The pinned bar appears only once the whole header (notes and stats included) has passed under the strip
-  // the bar occupies, so the opaque bar never sits beside visible header content, and file headers can stay
-  // pinned at the same offset with no gap. A zero-height sentinel marks the header's bottom; it is the only
-  // boundary, so there is no flicker.
+  // File headers stick directly under the PR band, whose height changes when it expands.
   useEffect(() => {
     const main = mainRef.current
-    const sentinel = main?.querySelector(".pr-bar-end")
-    if (!main || !sentinel) return setCondensed(false)
-    const observer = new IntersectionObserver(
-      ([entry]) => setCondensed(Boolean(entry && !entry.isIntersecting && entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0))),
-      { root: main, threshold: 0, rootMargin: `-${PINNED_BAR_HEIGHT}px 0px 0px 0px` },
-    )
-    observer.observe(sentinel)
+    const band = main?.querySelector<HTMLElement>(".pr-band")
+    if (!main || !band) return
+    const observer = new ResizeObserver(() => main.style.setProperty("--sticky-offset", `${band.offsetHeight}px`))
+    observer.observe(band)
     return () => observer.disconnect()
-  }, [current, view, Boolean(session.items[current])])
+  }, [current, view])
 
   const handBack = async () => {
     const res = await fetch("/api/handback", { method: "POST", body: JSON.stringify(state) })
@@ -661,20 +651,19 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
               load={load}
               review={review}
               state={state}
-              condensed={condensed}
+              expanded={cursorIndex === HEADER}
               viewed={
                 model && viewed.size
                   ? { done: model.files.filter((file) => viewed.has(file.name)).length, total: model.files.length }
                   : null
               }
-            >
-              <PrNotes
-                notes={prNotes}
-                focus={cursorIndex === HEADER ? noteFocus : null}
-                onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
-                onDelete={deleteNote}
-              />
-            </PrHeader>
+            />
+            <PrNotes
+              notes={prNotes}
+              focus={cursorIndex === HEADER ? noteFocus : null}
+              onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
+              onDelete={deleteNote}
+            />
             {load && !load.ok ? (
               <div className="error">
                 Could not load {current}: {load.error}
