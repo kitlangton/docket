@@ -843,22 +843,36 @@ kbd {
 }
 
 .note {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  padding: 8px 12px;
-  border-left: 2px solid var(--accent);
-  border-radius: 0 6px 6px 0;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
   background: var(--note);
   color: var(--text);
-  white-space: pre-wrap;
   cursor: pointer;
+  transition: border-color 120ms;
+}
+
+.note:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+}
+
+.note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .note-range {
-  flex: none;
   font: 11px/1.5 var(--mono);
-  color: var(--accent);
+  color: var(--text-3);
+}
+
+.note-body {
+  padding: 8px 12px 10px;
+  white-space: pre-wrap;
 }
 
 .draft {

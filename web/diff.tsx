@@ -2,6 +2,7 @@ import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from "@p
 import { FileDiff, type FileDiffOptions } from "@pierre/diffs/react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note, Side } from "../src/types"
+import { NOTE_RANGE_CSS, type NoteRange, stampNoteRanges } from "./note-ranges"
 import { SEPARATOR_CSS, stampSeparators } from "./separators"
 
 export type Draft = { path: string; side: Side; startLine?: number; line: number; body: string; noteId?: string }
@@ -74,6 +75,24 @@ const VISUAL_CSS = /* css */ `
 
 export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
   const { onLine, onRange, onToggle, index } = props
+  const diffNode = useRef<HTMLElement | null>(null)
+  const noteRanges = useMemo<NoteRange[]>(() => {
+    const ranges = props.notes.flatMap((note) =>
+      note.side && note.line !== undefined && note.startLine !== undefined && note.startLine !== note.line
+        ? [{ side: note.side, start: Math.min(note.startLine, note.line), end: Math.max(note.startLine, note.line) }]
+        : [],
+    )
+    const draft = props.draft
+    if (draft?.startLine !== undefined && draft.startLine !== draft.line) {
+      ranges.push({ side: draft.side, start: Math.min(draft.startLine, draft.line), end: Math.max(draft.startLine, draft.line) })
+    }
+    return ranges
+  }, [props.notes, props.draft])
+  const noteRangesRef = useRef(noteRanges)
+  noteRangesRef.current = noteRanges
+  useEffect(() => {
+    if (diffNode.current) stampNoteRanges(diffNode.current, noteRanges)
+  }, [noteRanges])
   const options = useMemo<FileDiffOptions<AnnotationMeta, undefined>>(
     () => ({
       theme: { dark: "pierre-dark", light: "pierre-light" },
@@ -83,9 +102,15 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       hunkSeparators: "line-info-basic",
       lineDiffType: "word-alt",
       overflow: "scroll",
-      unsafeCSS: BASE_CSS + SEPARATOR_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
+      unsafeCSS: BASE_CSS + SEPARATOR_CSS + NOTE_RANGE_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
       onPostRender: (node, _instance, phase) => {
-        if (phase !== "unmount") stampSeparators(node, props.file)
+        if (phase === "unmount") {
+          diffNode.current = null
+          return
+        }
+        diffNode.current = node
+        stampSeparators(node, props.file)
+        stampNoteRanges(node, noteRangesRef.current)
       },
       enableGutterUtility: true,
       enableLineSelection: true,
@@ -116,12 +141,14 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       if (meta.kind === "draft") return <DraftEditor draft={meta.draft} onSave={onSaveDraft} onCancel={onCancelDraft} />
       return (
         <div className="note" onClick={() => onEditNote(meta.note)}>
-          {meta.note.startLine ? (
+          <div className="note-head">
             <span className="note-range">
-              Lines {meta.note.startLine}–{meta.note.line}
+              {meta.note.startLine !== undefined && meta.note.startLine !== meta.note.line
+                ? `Lines ${meta.note.startLine}–${meta.note.line}`
+                : `Line ${meta.note.line}`}
             </span>
-          ) : null}
-          <span className="note-body">{meta.note.body}</span>
+          </div>
+          <div className="note-body">{meta.note.body}</div>
         </div>
       )
     },
