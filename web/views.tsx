@@ -374,7 +374,6 @@ export function StatusBar(props: {
   mode: string
   position: string
   pending: string
-  matches: string
   message: string
 }) {
   const counts = countVerdicts(props.order, props.state)
@@ -387,7 +386,6 @@ export function StatusBar(props: {
         </span>
         {props.position ? <span className="muted">{props.position}</span> : null}
         {props.mode ? <span className="muted">{props.mode}</span> : null}
-        {props.matches ? <span className="status-matches tabular">{props.matches}</span> : null}
         {props.message ? <span className="status-message">{props.message}</span> : null}
       </span>
       {props.pending ? <span className="status-pending">{props.pending}</span> : null}
@@ -433,7 +431,7 @@ export function Help(props: { onClose: () => void }) {
   )
 }
 
-/** The vim-style bottom line for `/` search and `:` commands. */
+/** The vim-style bottom line for `:` commands. */
 export function CommandBar(props: {
   prefix: string
   value: string

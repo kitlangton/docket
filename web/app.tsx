@@ -5,7 +5,6 @@ import { FileBlock, type Draft } from "./diff"
 import { rowElement } from "./dom"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
 import { feed, keyName, type Action, type Binding, type Mode, type Pending } from "./keymap"
-import { findMatches, matchIndexAt, useSearchHighlights, wordAt, type Match, type Query } from "./search"
 import {
   CommandBar,
   FilePalette,
@@ -52,7 +51,7 @@ type PromptState = { kind: "reject" } | { kind: "note"; noteId?: string; initial
 type ScrollIntent = "top" | "visible" | "none" | "center" | "tight" | "bottom"
 type Position = { id: string; index: number }
 type VerdictValue = { verdict: Verdict | null; reason?: string }
-type Bar = { kind: "search" | "command" | "confirm"; text: string }
+type Bar = { kind: "command" | "confirm"; text: string }
 
 const EMPTY_PENDING: Pending = { count: "", keys: [] }
 // Matches --diffs-line-height and the file header band height in styles.css.
@@ -97,9 +96,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [message, setMessage] = useState<{ text: string; at: number } | null>(null)
   const [bar, setBar] = useState<Bar | null>(null)
-  const barOrigin = useRef<{ index: number; search: Query | null; searchIndex: number } | null>(null)
-  const [search, setSearch] = useState<Query | null>(null)
-  const [searchIndex, setSearchIndex] = useState(-1)
   const [closed, setClosed] = useState(false)
   const jumpsRef = useRef<{ list: Position[]; index: number }>({ list: [], index: 0 })
   const undoRef = useRef<{ id: string; before: VerdictValue; after: VerdictValue }[]>([])
@@ -435,85 +431,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     applyVerdict(change.id, change.after, "Redid")
   }
 
-  // --- Search over the current PR's diff text, both sides.
-  const runSearch = (query: Query | null) => {
-    setSearch(query)
-    if (!query?.pattern) return []
-    return findMatches(model?.rows ?? [], query)
-  }
-  const gotoMatch = (match: Match) => {
-    const row = model?.rows[match.row]
-    if (!row || !model) return
-    const file = model.files[row.file]!
-    if (isCollapsed(row.file)) setFolds((prev) => ({ ...prev, [`${current}:${file.name}`]: false }))
-    moveCursor(match.row, "visible", "line")
-  }
-  const stepMatch = (direction: 1 | -1, count = 1, query = search) => {
-    const list = query ? findMatches(model?.rows ?? [], query) : []
-    if (!list.length) return say(query ? `Pattern not found: ${query.pattern}` : "No previous search")
-    const from = Math.max(cursorIndex, HEADER)
-    const steps = Array.from({ length: count })
-    const final = steps.reduce<{ index: number; wrapped: boolean }>(
-      (state) => {
-        const at = list[state.index]?.row ?? from
-        const next =
-          direction === 1
-            ? list.findIndex((match, index) => match.row > at || (match.row === at && index > state.index && state.index >= 0))
-            : list.findLastIndex((match, index) => match.row < at || (match.row === at && index < state.index))
-        if (next >= 0) return { index: next, wrapped: state.wrapped }
-        return { index: direction === 1 ? 0 : list.length - 1, wrapped: true }
-      },
-      { index: matchIndexAt(list, from, search === query ? searchIndex : -1), wrapped: false },
-    )
-    recordJump()
-    setSearchIndex(final.index)
-    gotoMatch(list[final.index]!)
-    if (final.wrapped) say("Search wrapped")
-  }
-  const searchWord = (direction: 1 | -1) => {
-    const word = cursor ? wordAt(cursor.text) : undefined
-    if (!word) return say("No word under the cursor")
-    const query: Query = { pattern: word, word: true }
-    runSearch(query)
-    stepMatch(direction, 1, query)
-  }
-
-  // --- The / and : bottom line.
-  const openBar = (kind: "search" | "command") => {
-    barOrigin.current = { index: cursorIndex, search, searchIndex }
-    setBar({ kind, text: "" })
-  }
+  // --- The : bottom line.
+  const openBar = () => setBar({ kind: "command", text: "" })
   const closeBar = () => setBar(null)
-  const cancelBar = () => {
-    const origin = barOrigin.current
-    if (bar?.kind === "search" && origin) {
-      setSearch(origin.search)
-      setSearchIndex(origin.searchIndex)
-      moveCursor(origin.index, origin.index === HEADER ? "top" : "visible", origin.index === HEADER ? "block" : "line")
-    }
-    closeBar()
-  }
-  const searchInput = (text: string) => {
-    setBar({ kind: "search", text })
-    const origin = barOrigin.current
-    const list = runSearch(text ? { pattern: text, word: false } : null)
-    const next = list.findIndex((match) => match.row > (origin?.index ?? HEADER))
-    const index = next >= 0 ? next : list.length ? 0 : -1
-    setSearchIndex(index)
-    if (index >= 0) gotoMatch(list[index]!)
-  }
-  const submitSearch = (text: string) => {
-    closeBar()
-    if (!text) return
-    const list = findMatches(model?.rows ?? [], { pattern: text, word: false })
-    if (!list.length) return say(`Pattern not found: ${text}`)
-    const origin = barOrigin.current
-    if (origin) {
-      const jumps = jumpsRef.current
-      jumps.list = [...jumps.list.slice(0, jumps.index), { id: current, index: origin.index }].slice(-100)
-      jumps.index = jumps.list.length
-    }
-  }
   const runCommand = async (text: string) => {
     closeBar()
     const command = text.trim()
@@ -711,11 +631,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     cursorBottom: () => scrollCursor("bottom"),
     jumpBack: (count) => jumpBack(count ?? 1),
     jumpForward: (count) => jumpForward(count ?? 1),
-    searchStart: () => openBar("search"),
-    searchNext: (count) => stepMatch(1, count ?? 1),
-    searchPrev: (count) => stepMatch(-1, count ?? 1),
-    searchWordForward: () => searchWord(1),
-    searchWordBack: () => searchWord(-1),
     approve: () => decide("approve"),
     reject: () => setPrompt({ kind: "reject" }),
     skip: () => decide("skip"),
@@ -780,17 +695,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       const url = session.items[current]?.ok ? session.items[current].data.meta.url : undefined
       if (url) window.open(url, "_blank")
     },
-    commandLine: () => openBar("command"),
+    commandLine: openBar,
     summary: () => {
       if (cursor && model && isCollapsed(cursor.file)) return void toggleFold(model.files[cursor.file]!.name)
       openSummary()
     },
     handBackClose: () => void handBack(),
     help: () => setHelp(true),
-    cancel: () => {
-      setNoteFocus(null)
-      setSearch(null)
-    },
+    cancel: () => setNoteFocus(null),
     summaryNext: () => setSummaryIndex((index) => Math.min(order.length - 1, index + 1)),
     summaryPrev: () => setSummaryIndex((index) => Math.max(0, index - 1)),
     summaryOpen: () => {
@@ -883,13 +795,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   }
 
   const load = session.items[current]
-  const matches = useMemo(() => (search ? findMatches(model?.rows ?? [], search) : []), [model, search])
-  const matchStatus = matches.length
-    ? `${searchIndex >= 0 && searchIndex < matches.length ? searchIndex + 1 : "–"}/${matches.length}  ${search?.word ? "*" : "/"}${search?.pattern}`
-    : search?.pattern
-      ? `0 matches  /${search.pattern}`
-      : ""
-  useSearchHighlights(mainRef, matches, searchIndex, model?.rows ?? [], [current, folds, diffStyle, view, ignoreWhitespace])
   const visualAnchor = visual && model ? rangeAnchor(model.rows, visual.anchor, cursorIndex) : undefined
   const visualCount = visualAnchor ? visualAnchor.line - (visualAnchor.startLine ?? visualAnchor.line) + 1 : 0
   const statusPosition = visual
@@ -1008,9 +913,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
           Comment <kbd>c</kbd>
         </button>
       ) : null}
-      {bar?.kind === "search" ? (
-        <CommandBar prefix="/" value={bar.text} onChange={searchInput} onSubmit={submitSearch} onCancel={cancelBar} />
-      ) : bar?.kind === "command" ? (
+      {bar?.kind === "command" ? (
         <CommandBar prefix=":" value={bar.text} onChange={(text) => setBar({ kind: "command", text })} onSubmit={runCommand} onCancel={closeBar} />
       ) : bar?.kind === "confirm" ? (
         <CommandBar
@@ -1029,7 +932,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         state={state}
         position={view === "deck" ? statusPosition : ""}
         pending={pending}
-        matches={search && view === "deck" ? matchStatus : ""}
         mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
         message={message?.text ?? ""}
       />

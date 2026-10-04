@@ -32,8 +32,6 @@ export type FileBlockProps = {
 
 // Injected into the diff's shadow root. Keeps the diff chrome quiet and draws one cursor indicator.
 const BASE_CSS = /* css */ `
-::highlight(docket-search) { background-color: color-mix(in srgb, var(--skip) 28%, transparent); color: inherit; }
-::highlight(docket-search-current) { background-color: color-mix(in srgb, var(--skip) 70%, transparent); color: var(--bg); }
 :host { --diffs-bg: var(--bg); background-color: var(--bg); }
 [data-diffs-header] { position: sticky; top: var(--sticky-offset, 0); z-index: 3; min-height: 0; padding: 0; background: var(--bg); }
 [data-line], [data-no-newline] { --mix-dark: 88%; }

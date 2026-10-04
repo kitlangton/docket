@@ -4,7 +4,7 @@
  */
 
 export type Mode = "normal" | "visual" | "note" | "summary"
-export type Group = "Navigate" | "Search" | "Review" | "Folds" | "Commands"
+export type Group = "Navigate" | "Review" | "Folds" | "Commands"
 
 export type Action =
   | "changeNext"
@@ -28,11 +28,6 @@ export type Action =
   | "cursorBottom"
   | "jumpBack"
   | "jumpForward"
-  | "searchStart"
-  | "searchNext"
-  | "searchPrev"
-  | "searchWordForward"
-  | "searchWordBack"
   | "approve"
   | "reject"
   | "skip"
@@ -106,12 +101,6 @@ export const KEYMAP: Binding[] = [
   { keys: ["C-o"], action: "jumpBack", label: "Jump back", group: "Navigate", count: true },
   { keys: ["C-i", "Tab"], action: "jumpForward", label: "Jump forward", group: "Navigate", count: true },
 
-  { keys: ["/"], action: "searchStart", label: "Search the diff", group: "Search" },
-  { keys: ["n"], action: "searchNext", label: "Next match", group: "Search", count: true },
-  { keys: ["N"], action: "searchPrev", label: "Previous match", group: "Search", count: true },
-  { keys: ["*"], action: "searchWordForward", label: "Search word under cursor forward", group: "Search" },
-  { keys: ["#"], action: "searchWordBack", label: "Search word under cursor back", group: "Search" },
-
   { keys: ["a"], action: "approve", label: "Approve, then next", group: "Review" },
   { keys: ["r"], action: "reject", label: "Reject with a reason", group: "Review" },
   { keys: ["s"], action: "skip", label: "Skip, then next", group: "Review" },
@@ -144,7 +133,7 @@ export const KEYMAP: Binding[] = [
   { keys: ["z w"], action: "whitespaceToggle", label: "Ignore whitespace", group: "Commands" },
   { keys: ["O"], action: "openGithub", label: "Open on GitHub", group: "Commands" },
   { keys: ["?"], action: "help", label: "Toggle this help", group: "Commands", modes: ["normal", "visual", "note", "summary"] },
-  { keys: ["Escape"], action: "cancel", label: "Cancel pending key, selection, or search highlight", group: "Commands", modes: ["normal", "note"] },
+  { keys: ["Escape"], action: "cancel", label: "Cancel pending key or selection", group: "Commands", modes: ["normal", "note"] },
 
   { keys: ["j", "ArrowDown"], action: "summaryNext", label: "Next PR", group: "Commands", modes: ["summary"], hidden: true },
   { keys: ["k", "ArrowUp"], action: "summaryPrev", label: "Previous PR", group: "Commands", modes: ["summary"], hidden: true },
@@ -153,7 +142,7 @@ export const KEYMAP: Binding[] = [
   { keys: ["w"], action: "handBack", label: "Hand back", group: "Commands", modes: ["summary"] },
 ]
 
-export const GROUPS: Group[] = ["Navigate", "Search", "Review", "Folds", "Commands"]
+export const GROUPS: Group[] = ["Navigate", "Review", "Folds", "Commands"]
 
 // An ambiguous prefix (`]` before `] c`) waits this long before running the shorter binding.
 export const SEQUENCE_TIMEOUT = 400

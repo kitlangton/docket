@@ -1693,7 +1693,7 @@ kbd {
   color: var(--text);
 }
 
-/* Vim chrome: pending keys, search counts, transient messages, and the command line */
+/* Vim chrome: pending keys, transient messages, and the command line */
 
 .status-pending {
   margin-left: auto;
@@ -1703,11 +1703,6 @@ kbd {
   background: var(--active);
   color: var(--text);
   font: 500 11.5px/18px var(--mono);
-}
-
-.status-matches {
-  color: var(--text-2);
-  font-family: var(--mono);
 }
 
 .status-message {

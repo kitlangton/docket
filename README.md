@@ -63,12 +63,6 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `zb` | Cursor line to bottom |
 | `Ctrl-o` | Jump back (count) |
 | `Ctrl-i` / `Tab` | Jump forward (count) |
-| **Search** | |
-| `/` | Search the diff |
-| `n` | Next match (count) |
-| `N` | Previous match (count) |
-| `*` | Search word under cursor forward |
-| `#` | Search word under cursor back |
 | **Review** | |
 | `a` | Approve, then next |
 | `r` | Reject with a reason |
@@ -99,15 +93,13 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `zw` | Ignore whitespace |
 | `O` | Open on GitHub |
 | `?` | Toggle this help |
-| `Escape` | Cancel pending key, selection, or search highlight |
+| `Escape` | Cancel pending key or selection |
 | `w` | Hand back _(summary)_ |
 <!-- keys:end -->
 
 Sequences like `gg`, `]c`, and `zz` are typed one key after another; a bare `]` or `[` runs after a short pause (about 400 ms) if no `c` follows. Bindings marked "(count)" take a count prefix such as `3j`, `2]`, or `5J`; `10G` goes to line 10 of the current file. The status bar shows a pending count or key while you type.
 
-`/` searches the current PR's diff text on both sides (smartcase, literal), highlighting matches as you type; `Enter` confirms and `Esc` restores where you were. `n`/`N` move between matches and wrap with a brief "Search wrapped". `*`/`#` search for the first identifier on the cursor line as a whole word. Matches in folded files unfold when you jump to them.
-
-`:` opens a command line: `:w` (or `:wq`, `ZZ`) hands back and exits, `:q` closes without handing back (asking first if you have verdicts; `:q!` skips the question), `:s` or `:summary` opens the summary, and `:52987` jumps to that PR (or `:3` to the third). `C-o` and `C-i`/`Tab` walk the jumplist of big jumps: `gg`, `G`, the file palette, PR switches, searches, and `:N`. `u` and `C-r` undo and redo verdicts given in this session.
+`:` opens a command line: `:w` (or `:wq`, `ZZ`) hands back and exits, `:q` closes without handing back (asking first if you have verdicts; `:q!` skips the question), `:s` or `:summary` opens the summary, and `:52987` jumps to that PR (or `:3` to the third). `C-o` and `C-i`/`Tab` walk the jumplist of big jumps: `gg`, `G`, the file palette, PR switches, and `:N`. `u` and `C-r` undo and redo verdicts given in this session.
 
 PR notes are listed under the header. From the header, `j`/`k` step through them; `e` (or `Enter`) edits the focused note, `d` deletes it, and `Esc` leaves. In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels; saving an empty note deletes it.
 
