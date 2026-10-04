@@ -30,6 +30,10 @@ jobs:
       - name: Typecheck and key table
         run: bun run typecheck
 
+      # npm publish silently rewrites invalid package.json fields; keep the manifest canonical.
+      - name: package.json is canonical
+        run: npm pkg fix && git diff --exit-code package.json
+
       - name: Unit tests
         run: bun run test
 

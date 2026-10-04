@@ -15,12 +15,18 @@
   ],
   "homepage": "https://github.com/kitlangton/docket#readme",
   "bugs": "https://github.com/kitlangton/docket/issues",
-  "repository": "github:kitlangton/docket",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kitlangton/docket.git"
+  },
   "license": "MIT",
   "author": "Kit Langton",
   "type": "module",
   "bin": {
-    "docket": "./bin/docket.ts"
+    "docket": "bin/docket.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "bin",
@@ -41,7 +47,8 @@
     "typecheck": "tsc --noEmit && bun scripts/keys.ts --check",
     "keys": "bun scripts/keys.ts",
     "test": "bun test ./test",
-    "e2e": "bun test ./e2e"
+    "e2e": "bun test ./e2e",
+    "prepublishOnly": "bun run typecheck && bun run test"
   },
   "dependencies": {
     "@pierre/diffs": "^1.5.1",

@@ -11,7 +11,7 @@ docket reads diffs from your local git checkout (and PR metadata from `gh`). It 
 Requires [Bun](https://bun.sh) 1.3+ and git; [`gh`](https://cli.github.com) for GitHub PRs.
 
 ```sh
-bun install -g github:kitlangton/docket
+bun install -g @kitlangton/docket
 ```
 
 ## Quick start
@@ -218,6 +218,12 @@ bun run keys        # regenerate the README key table
 ```
 
 The end-to-end tests run each case on its own port with temporary data and cache directories, so they don't touch a running docket.
+
+Releases publish to npm from CI on a version tag, using npm trusted publishing:
+
+```sh
+npm version patch && git push --follow-tags
+```
 
 ## Credits
 
