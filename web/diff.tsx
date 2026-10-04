@@ -279,7 +279,7 @@ function FileHeader(props: {
 }
 
 /** Circled change-type glyph, after diffshub's file headers. */
-function StatusIcon(props: { type: FileDiffMetadata["type"] }) {
+export function StatusIcon(props: { type: FileDiffMetadata["type"] }) {
   const kind = props.type === "new" ? "added" : props.type === "deleted" ? "deleted" : props.type === "change" ? "modified" : "renamed"
   return (
     <svg className={`fh-status is-${kind}`} width="14" height="14" viewBox="0 0 14 14" aria-label={kind}>

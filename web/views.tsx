@@ -108,6 +108,8 @@ export function Rail(props: {
   stamped: string | null
   /** PRs with commits since their review. */
   updated: Set<string>
+  /** The current PR's file tree, shown in place of the PR list. */
+  tree?: ReactNode
   onSelect: (id: string) => void
   onHome: () => void
 }) {
@@ -137,47 +139,48 @@ export function Rail(props: {
           <span className="tabular">{loading ? `Loading ${ids.length - loading}/${ids.length}` : `${done}/${ids.length}`}</span>
         </div>
       </div>
-      {props.manifest.groups.map((group) => {
-        const progress = groupProgress(group, props.state)
-        const isCurrentGroup = group.prs.some((pr) => itemId(pr) === props.current)
-        const single = props.manifest.groups.length === 1
-        return (
-          <section className={`rail-group${isCurrentGroup ? " is-current" : ""}`} key={group.title}>
-            {single ? null : (
-              <div className="rail-group-head" title={group.why}>
-                <span className="rail-group-title">{group.title}</span>
-                <span className={`rail-group-count tabular${progress.done === progress.total ? " is-done" : ""}`}>
-                  {progress.done}/{progress.total}
-                </span>
-              </div>
-            )}
-            {group.prs.map((pr) => {
-              const id = itemId(pr)
-              const load = props.items[id]
-              const review = props.state.reviews[id]
-              const notes = noteCount(review)
-              const title = load?.ok ? itemTitle(load.data.meta) : load ? "Failed to load" : null
-              return (
-                <button
-                  key={id}
-                  className={`rail-pr${id === props.current ? " is-current" : ""}${review?.verdict ? " is-done" : ""}`}
-                  title={pr.after?.length ? `${title ?? ""}\nAfter ${pr.after.map((n) => `#${n}`).join(", ")}` : (title ?? "")}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => props.onSelect(id)}
-                >
-                  <Glyph verdict={review?.verdict} stamp={props.stamped === id} stale={props.updated.has(id)} />
-                  <span className="rail-pr-title">{title ?? <Skeleton width="70%" />}</span>
-                  {props.updated.has(id) ? <span className="updated-dot" title="New commits since your review" /> : null}
-                  {notes ? <span className="rail-notes tabular">{notes}</span> : null}
-                  {pr.confidence ? <ConfidenceMeter confidence={pr.confidence} /> : null}
-                  {load?.ok ? <span className="rail-size">{sizeOf(load.data.meta)}</span> : null}
-                  <span className="rail-num tabular">{pr.number ?? ""}</span>
-                </button>
-              )
-            })}
-          </section>
-        )
-      })}
+      {props.tree ??
+        props.manifest.groups.map((group) => {
+          const progress = groupProgress(group, props.state)
+          const isCurrentGroup = group.prs.some((pr) => itemId(pr) === props.current)
+          const single = props.manifest.groups.length === 1
+          return (
+            <section className={`rail-group${isCurrentGroup ? " is-current" : ""}`} key={group.title}>
+              {single ? null : (
+                <div className="rail-group-head" title={group.why}>
+                  <span className="rail-group-title">{group.title}</span>
+                  <span className={`rail-group-count tabular${progress.done === progress.total ? " is-done" : ""}`}>
+                    {progress.done}/{progress.total}
+                  </span>
+                </div>
+              )}
+              {group.prs.map((pr) => {
+                const id = itemId(pr)
+                const load = props.items[id]
+                const review = props.state.reviews[id]
+                const notes = noteCount(review)
+                const title = load?.ok ? itemTitle(load.data.meta) : load ? "Failed to load" : null
+                return (
+                  <button
+                    key={id}
+                    className={`rail-pr${id === props.current ? " is-current" : ""}${review?.verdict ? " is-done" : ""}`}
+                    title={pr.after?.length ? `${title ?? ""}\nAfter ${pr.after.map((n) => `#${n}`).join(", ")}` : (title ?? "")}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => props.onSelect(id)}
+                  >
+                    <Glyph verdict={review?.verdict} stamp={props.stamped === id} stale={props.updated.has(id)} />
+                    <span className="rail-pr-title">{title ?? <Skeleton width="70%" />}</span>
+                    {props.updated.has(id) ? <span className="updated-dot" title="New commits since your review" /> : null}
+                    {notes ? <span className="rail-notes tabular">{notes}</span> : null}
+                    {pr.confidence ? <ConfidenceMeter confidence={pr.confidence} /> : null}
+                    {load?.ok ? <span className="rail-size">{sizeOf(load.data.meta)}</span> : null}
+                    <span className="rail-num tabular">{pr.number ?? ""}</span>
+                  </button>
+                )
+              })}
+            </section>
+          )
+        })}
     </nav>
   )
 }

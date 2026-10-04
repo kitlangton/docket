@@ -14,6 +14,7 @@ import { Home } from "./home"
 import { FileBlock, type Draft } from "./diff"
 import { rowElement } from "./dom"
 import { expandAround, fileKey, loader } from "./expand"
+import { FileTree, treeRows, type TreeRow } from "./tree"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
 import { feed, keyName, type Action, type Binding, type Mode, type Pending } from "./keymap"
 import {
@@ -177,6 +178,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   useEffect(() => localStorage.removeItem("docket.separator"), [])
   const [help, setHelp] = useState(false)
   const [palette, setPalette] = useState(false)
+  const [treeOn, setTreeOn] = useState(() => localStorage.getItem("docket.tree") === "on")
+  const [treeFocus, setTreeFocus] = useState(false)
+  const [treeSelected, setTreeSelected] = useState<string | null>(null)
+  const [treeClosed, setTreeClosed] = useState<ReadonlySet<string>>(new Set())
+  const [visibleFile, setVisibleFile] = useState<number | null>(null)
   const [prompt, setPrompt] = useState<PromptState | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [summaryIndex, setSummaryIndex] = useState(0)
@@ -708,6 +714,57 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     expandAround(fileKey(session.id, current, file.name, ignoreWhitespace), cursor.hunk, all)
   }
 
+  // --- File tree.
+  const tree = useMemo(() => (model && treeOn ? treeRows(model.files, treeClosed) : []), [model, treeOn, treeClosed])
+  const currentFile = visibleFile ?? cursor?.file ?? null
+  const focusTree = () => {
+    setTreeFocus(true)
+    const here = tree.find((row) => row.kind === "file" && row.index === currentFile)
+    if (!tree.some((row) => row.path === treeSelected)) setTreeSelected(here?.path ?? tree[0]?.path ?? null)
+  }
+  const stepTree = (delta: number) => {
+    const index = tree.findIndex((row) => row.path === treeSelected)
+    const next = tree[Math.max(0, Math.min(tree.length - 1, index + delta))]
+    if (next) setTreeSelected(next.path)
+  }
+  const toggleTreeDir = (path: string) =>
+    setTreeClosed((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(path)) next.add(path)
+      return next
+    })
+  const pickTreeRow = (row: TreeRow) => {
+    setTreeSelected(row.path)
+    if (row.kind === "dir") return toggleTreeDir(row.path)
+    recordJump()
+    if (isCollapsed(row.index)) setFold(row.index, false)
+    jumpToFile(row.index)
+    setTreeFocus(false)
+  }
+
+  // The file at the top of the pane, for the tree's highlight while scrolling.
+  useEffect(() => {
+    const main = mainRef.current
+    if (!main || !treeOn) return
+    const frame = { id: 0 }
+    const measure = () => {
+      cancelAnimationFrame(frame.id)
+      frame.id = requestAnimationFrame(() => {
+        // The file under a line a quarter of the way down, where jumps place the cursor.
+        const probe = main.getBoundingClientRect().top + main.clientHeight * 0.25
+        const sections = [...main.querySelectorAll<HTMLElement>("[data-file-index]")]
+        const visible = sections.find((section) => section.getBoundingClientRect().bottom > probe)
+        setVisibleFile(visible ? Number(visible.dataset.fileIndex) : null)
+      })
+    }
+    measure()
+    main.addEventListener("scroll", measure, { passive: true })
+    return () => {
+      main.removeEventListener("scroll", measure)
+      cancelAnimationFrame(frame.id)
+    }
+  }, [treeOn, current, view, model])
+
   const fileStep = (direction: 1 | -1, count: number) => {
     const rows = model?.rows ?? []
     const file = cursor?.file ?? HEADER
@@ -853,6 +910,28 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     expandContextAll: () => expandCursor(true),
     foldCloseAll: () => setAllFolds(true),
     palette: () => setPalette(true),
+    treeToggle: () => {
+      if (treeOn && !treeFocus) return void focusTree()
+      const next = !treeOn
+      localStorage.setItem("docket.tree", next ? "on" : "off")
+      setTreeOn(next)
+      if (next) focusTree()
+      else setTreeFocus(false)
+    },
+    treeNext: () => stepTree(1),
+    treePrev: () => stepTree(-1),
+    treeOpen: () => {
+      const row = tree.find((item) => item.path === treeSelected)
+      if (row) pickTreeRow(row)
+    },
+    treeClose: () => {
+      const row = tree.find((item) => item.path === treeSelected)
+      if (row?.kind === "dir" && row.open) return void toggleTreeDir(row.path)
+      // On a file or a closed folder, h moves to the parent folder.
+      const parent = tree.findLast((item) => item.kind === "dir" && row !== undefined && row.path.startsWith(`${item.path}/`))
+      if (parent) setTreeSelected(parent.path)
+    },
+    treeExit: () => setTreeFocus(false),
     splitToggle: () => {
       const next = diffStyle === "split" ? "unified" : "split"
       localStorage.setItem("docket.diffStyle", next)
@@ -900,6 +979,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   const activeModes = (): Mode[] => {
     if (view === "summary") return ["summary"]
+    if (treeFocus && treeOn) return ["tree"]
     if (visual) return ["visual", "normal"]
     if (cursorIndex === HEADER && prNotes.length) return ["note", "normal"]
     return ["normal"]
@@ -1004,6 +1084,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
         current={current}
         stamped={stamped}
         updated={updatedIds}
+        tree={
+          treeOn && model && view === "deck" ? (
+            <FileTree rows={tree} selected={treeSelected} current={currentFile} focused={treeFocus} viewed={viewed} onPick={pickTreeRow} />
+          ) : undefined
+        }
         onHome={props.onHome}
         onSelect={(id) => {
           setView("deck")

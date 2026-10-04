@@ -2095,3 +2095,70 @@ kbd {
 .orphan-notes {
   padding: 8px 0;
 }
+
+/* File tree */
+
+.tree {
+  padding: 4px 0 12px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  padding-right: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-2);
+  font: var(--fs-small) / 1 var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: var(--hover);
+}
+
+.tree-row.is-dir {
+  color: var(--text-3);
+}
+
+.tree-row.is-file .tree-name {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.tree-row.is-current {
+  background: var(--active);
+  color: var(--text);
+}
+
+.tree-row.is-viewed .tree-name {
+  color: var(--text-4);
+}
+
+.tree.is-focused .tree-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--active);
+  color: var(--text);
+}
+
+.tree-chevron {
+  flex: none;
+  width: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tree-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

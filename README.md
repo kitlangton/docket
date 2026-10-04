@@ -102,6 +102,10 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `Enter` | Summary (unfolds a folded file first) |
 | `ZZ` | Hand back and close |
 | `f` | Jump to file |
+| `T` | File tree |
+| `Enter` / `o` / `l` | Open file or folder _(tree)_ |
+| `h` | Close folder _(tree)_ |
+| `Escape` | Back to the diff _(tree)_ |
 | `t` | Split / unified |
 | `zw` | Ignore whitespace |
 | `O` | Open on GitHub |

@@ -3,7 +3,7 @@
  * (`bun run keys` regenerates it), so the three cannot drift.
  */
 
-export type Mode = "normal" | "visual" | "note" | "summary" | "home"
+export type Mode = "normal" | "visual" | "note" | "summary" | "home" | "tree"
 export type Group = "Navigate" | "Review" | "Folds" | "Commands" | "Inbox"
 
 export type Action =
@@ -53,6 +53,12 @@ export type Action =
   | "expandContext"
   | "expandContextAll"
   | "interdiffToggle"
+  | "treeToggle"
+  | "treeNext"
+  | "treePrev"
+  | "treeOpen"
+  | "treeClose"
+  | "treeExit"
   | "palette"
   | "splitToggle"
   | "whitespaceToggle"
@@ -152,10 +158,22 @@ export const KEYMAP: Binding[] = [
   { keys: ["Enter"], action: "summary", label: "Summary (unfolds a folded file first)", group: "Commands" },
   { keys: ["Z Z"], action: "handBackClose", label: "Hand back and close", group: "Commands", modes: ["normal", "summary"] },
   { keys: ["f"], action: "palette", label: "Jump to file", group: "Commands" },
+  { keys: ["T"], action: "treeToggle", label: "File tree", group: "Commands", modes: ["normal", "tree"] },
+  { keys: ["j", "ArrowDown"], action: "treeNext", label: "Next entry", group: "Commands", modes: ["tree"], hidden: true },
+  { keys: ["k", "ArrowUp"], action: "treePrev", label: "Previous entry", group: "Commands", modes: ["tree"], hidden: true },
+  { keys: ["Enter", "o", "l"], action: "treeOpen", label: "Open file or folder", group: "Commands", modes: ["tree"] },
+  { keys: ["h"], action: "treeClose", label: "Close folder", group: "Commands", modes: ["tree"] },
+  { keys: ["Escape"], action: "treeExit", label: "Back to the diff", group: "Commands", modes: ["tree"] },
   { keys: ["t"], action: "splitToggle", label: "Split / unified", group: "Commands" },
   { keys: ["z w"], action: "whitespaceToggle", label: "Ignore whitespace", group: "Commands" },
   { keys: ["O"], action: "openGithub", label: "Open on GitHub", group: "Commands" },
-  { keys: ["?"], action: "help", label: "Toggle this help", group: "Commands", modes: ["normal", "visual", "note", "summary", "home"] },
+  {
+    keys: ["?"],
+    action: "help",
+    label: "Toggle this help",
+    group: "Commands",
+    modes: ["normal", "visual", "note", "summary", "home", "tree"],
+  },
   { keys: ["Escape"], action: "cancel", label: "Cancel pending key or selection", group: "Commands", modes: ["normal", "note"] },
 
   { keys: ["j", "ArrowDown"], action: "summaryNext", label: "Next PR", group: "Commands", modes: ["summary"], hidden: true },
