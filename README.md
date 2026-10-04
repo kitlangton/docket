@@ -100,7 +100,7 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `e` | Expand 20 lines of context around the change |
 | `E` | Expand all context around the change |
 | **Commands** | |
-| `:` | Command line (:w :q :wq :s :<PR number>) |
+| `:` | Command line (:w :q :wq :s :<PR number> :set wrap) |
 | `Enter` | Summary (unfolds a folded file first) |
 | `ZZ` | Hand back and close |
 | `f` | Jump to file |
@@ -124,7 +124,7 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 
 Sequences like `gg`, `]c`, and `zz` are typed one key after another; a bare `]` or `[` runs after a short pause (about 400 ms) if no `c` follows. Bindings marked "(count)" take a count prefix such as `3j`, `2]`, or `5J`; `10G` goes to line 10 of the current file. The status bar shows a pending count or key while you type.
 
-`:` opens a command line: `:w` (or `:wq`, `ZZ`) hands back and exits, `:q` closes without handing back (asking first if you have verdicts; `:q!` skips the question), `:s` or `:summary` opens the summary, and `:52987` jumps to that PR (or `:3` to the third). `C-o` and `C-i`/`Tab` walk the jumplist of big jumps: `gg`, `G`, the file palette, PR switches, and `:N`. `u` and `C-r` undo and redo verdicts given in this session.
+`:` opens a command line: `:w` (or `:wq`, `ZZ`) hands back and exits, `:q` closes without handing back (asking first if you have verdicts; `:q!` skips the question), `:s` or `:summary` opens the summary, `:52987` jumps to that PR (or `:3` to the third), and `:set wrap` / `:set nowrap` (or `:set wrap!`) toggles line wrapping. `C-o` and `C-i`/`Tab` walk the jumplist of big jumps: `gg`, `G`, the file palette, PR switches, and `:N`. `u` and `C-r` undo and redo verdicts given in this session.
 
 PR notes are listed under the header. From the header, `j`/`k` step through them; `e` (or `Enter`) edits the focused note, `d` deletes it, and `Esc` leaves. In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels; saving an empty note deletes it.
 

@@ -155,7 +155,7 @@ export const KEYMAP: Binding[] = [
   {
     keys: [":"],
     action: "commandLine",
-    label: "Command line (:w :q :wq :s :<PR number>)",
+    label: "Command line (:w :q :wq :s :<PR number> :set wrap)",
     group: "Commands",
     modes: ["normal", "summary"],
   },

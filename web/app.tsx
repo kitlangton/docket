@@ -175,6 +175,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     localStorage.getItem("docket.diffStyle") === "unified" ? "unified" : "split",
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
+  const [wrap, setWrap] = useState(() => localStorage.getItem("docket.wrap") === "on")
   useEffect(() => localStorage.removeItem("docket.separator"), [])
   const [help, setHelp] = useState(false)
   const [palette, setPalette] = useState(false)
@@ -591,6 +592,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       return setBar({ kind: "confirm", text: "" })
     }
     if (command === "s" || command === "summary") return openSummary()
+    const set = command.match(/^set?\s+(no)?wrap(!)?$/)
+    if (set) {
+      const next = set[2] ? !wrap : !set[1]
+      localStorage.setItem("docket.wrap", next ? "on" : "off")
+      scrollIntent.current = "visible"
+      return setWrap(next)
+    }
     if (/^#?\d+$/.test(command)) {
       const value = Number(command.replace("#", ""))
       const target =
@@ -1189,6 +1197,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
                   selection={selectionFor(index)}
                   visual={Boolean(visual) && cursor?.file === index}
                   diffStyle={diffStyle}
+                  wrap={wrap}
                   expandKey={fileKey(session.id, current, file.name, ignoreWhitespace) + (sinceReview ? ":since" : "")}
                   loadFiles={sinceReview ? undefined : loadFiles}
                   onLine={clickLine}

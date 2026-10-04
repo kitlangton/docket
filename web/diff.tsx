@@ -25,6 +25,7 @@ export type FileBlockProps = {
   /** Visual mode: show the selection as a range instead of the cursor. */
   visual: boolean
   diffStyle: "split" | "unified"
+  wrap: boolean
   /** Where this file's context expansions are recorded. */
   expandKey: string
   loadFiles: FileDiffOptions<AnnotationMeta, undefined>["loadDiffFiles"]
@@ -107,7 +108,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       diffIndicators: "none",
       hunkSeparators: "line-info-basic",
       lineDiffType: "word-alt",
-      overflow: "scroll",
+      overflow: props.wrap ? "wrap" : "scroll",
       unsafeCSS: BASE_CSS + SEPARATOR_CSS + NOTE_RANGE_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
       loadDiffFiles: props.loadFiles,
       onPostRender: (node, instance, phase) => {
@@ -134,7 +135,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       },
       onLineClick: (event) => onLine(index, event.annotationSide, event.lineNumber),
     }),
-    [props.diffStyle, props.visual, props.file, props.expandKey, props.loadFiles, onLine, onRange, index],
+    [props.diffStyle, props.wrap, props.visual, props.file, props.expandKey, props.loadFiles, onLine, onRange, index],
   )
 
   const annotations = useMemo(() => {
