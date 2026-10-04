@@ -89,7 +89,7 @@ async function diffPr(manifest: Manifest, meta: ItemMeta, fetched: boolean): Pro
   const base = await mergeBase(manifest, `origin/${meta.baseRefName}`, meta.headRefOid).catch(() => "")
   if (!base) return diffFromGh(manifest, meta)
   const [patch, patchIgnoreWhitespace] = await diffPair(manifest, base, meta.headRefOid)
-  return { ok: true, data: { meta, patch, patchIgnoreWhitespace, source: "git" } }
+  return { ok: true, data: { meta: { ...meta, baseOid: base }, patch, patchIgnoreWhitespace, source: "git" } }
 }
 
 async function diffFromGh(manifest: Manifest, meta: ItemMeta): Promise<ItemLoad> {
@@ -130,6 +130,7 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
     body,
     headRefName: isBranch ? branch : head,
     headRefOid: headOid,
+    baseOid: mb,
     baseRefName: base,
     state: "LOCAL",
     additions: stats.reduce((sum, row) => sum + (row[0] || 0), 0),
@@ -223,4 +224,46 @@ function cachePath(github: string, number: number) {
 async function writeCache(github: string, data: ItemData) {
   await mkdir(cacheDir(github), { recursive: true })
   await Bun.write(cachePath(github, Number(data.meta.id)), JSON.stringify(data))
+}
+
+/**
+ * One side of a file at a commit, for expanding diff context. Reads local git, falling back to GitHub
+ * when the commit isn't in the checkout. Resolves `undefined` when the file doesn't exist there.
+ */
+export async function fileAt(manifest: Manifest, oid: string, path: string) {
+  const local = await run([...git(manifest), "show", `${oid}:${path}`]).catch(() => undefined)
+  if (local !== undefined) return local
+  if (!manifest.repo.github) return undefined
+  return run([
+    "gh",
+    "api",
+    "-H",
+    "Accept: application/vnd.github.raw",
+    `repos/${manifest.repo.github}/contents/${encodeURI(path)}?ref=${oid}`,
+  ]).catch(() => undefined)
+}
+
+/** The merge base for an item loaded before `baseOid` was recorded. */
+export async function baseFor(manifest: Manifest, meta: ItemMeta) {
+  if (meta.baseOid) return meta.baseOid
+  const base = meta.state === "LOCAL" ? meta.baseRefName : `origin/${meta.baseRefName}`
+  return mergeBase(manifest, base, meta.headRefOid).catch(() => undefined)
+}
+
+/**
+ * What changed in a PR since `from`, its head at the last review: the trees of the two heads compared on the
+ * files the PR touches, which also works across force-pushes. When `from` is no longer available, returns the
+ * full diff with a status.
+ */
+export async function interdiff(manifest: Manifest, data: ItemData, from: string) {
+  const files = [...new Set([...data.patch.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)].flatMap((match) => [match[1]!, match[2]!]))]
+  const available =
+    (await hasCommit(manifest, from)) ||
+    (await run([...git(manifest), "fetch", "--quiet", "origin", from])
+      .then(() => hasCommit(manifest, from))
+      .catch(() => false))
+  if (!available) return { patch: data.patch, status: "The reviewed commit is gone; showing the full diff" }
+  if (!files.length) return { patch: "" }
+  const patch = await run([...git(manifest), "diff", "--no-color", "--no-ext-diff", "-M", from, data.meta.headRefOid, "--", ...files])
+  return { patch }
 }

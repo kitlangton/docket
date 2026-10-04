@@ -88,12 +88,15 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `e` / `Enter` | Edit the focused PR note _(note)_ |
 | `d` | Delete the focused PR note _(note)_ |
 | `x` | Mark file viewed |
+| `i` | Toggle changes since your review |
 | **Folds** | |
 | `za` / `o` | Toggle fold |
 | `zo` | Open fold |
 | `zc` | Close fold |
 | `zR` | Open all folds |
 | `zM` | Fold all files |
+| `e` | Expand 20 lines of context around the change |
+| `E` | Expand all context around the change |
 | **Commands** | |
 | `:` | Command line (:w :q :wq :s :<PR number>) |
 | `Enter` | Summary (unfolds a folded file first) |

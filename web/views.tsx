@@ -20,8 +20,8 @@ const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "R
 const STATE_LABEL = { OPEN: "Open", MERGED: "Merged", CLOSED: "Closed", LOCAL: "Local" }
 
 /** Verdict glyph drawn on a 14px grid so it stays crisp at any zoom. */
-export function Glyph(props: { verdict: Verdict | null | undefined; stamp?: boolean }) {
-  const className = `glyph${props.verdict ? ` is-${props.verdict}` : ""}${props.stamp ? " is-stamp" : ""}`
+export function Glyph(props: { verdict: Verdict | null | undefined; stamp?: boolean; stale?: boolean }) {
+  const className = `glyph${props.verdict ? ` is-${props.verdict}` : ""}${props.stamp ? " is-stamp" : ""}${props.stale ? " is-stale" : ""}`
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden>
       {props.verdict === "approve" ? <path d="M3.5 7.4l2.3 2.3 4.7-5" /> : null}
@@ -106,6 +106,8 @@ export function Rail(props: {
   state: ReviewState
   current: string
   stamped: string | null
+  /** PRs with commits since their review. */
+  updated: Set<string>
   onSelect: (id: string) => void
   onHome: () => void
 }) {
@@ -163,8 +165,9 @@ export function Rail(props: {
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => props.onSelect(id)}
                 >
-                  <Glyph verdict={review?.verdict} stamp={props.stamped === id} />
+                  <Glyph verdict={review?.verdict} stamp={props.stamped === id} stale={props.updated.has(id)} />
                   <span className="rail-pr-title">{title ?? <Skeleton width="70%" />}</span>
+                  {props.updated.has(id) ? <span className="updated-dot" title="New commits since your review" /> : null}
                   {notes ? <span className="rail-notes tabular">{notes}</span> : null}
                   {pr.confidence ? <ConfidenceMeter confidence={pr.confidence} /> : null}
                   {load?.ok ? <span className="rail-size">{sizeOf(load.data.meta)}</span> : null}
@@ -190,6 +193,7 @@ export function PrHeader(props: {
   state: ReviewState
   viewed: { done: number; total: number } | null
   expanded: boolean
+  updated: boolean
 }) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
   const pr = props.entry.pr
@@ -236,11 +240,12 @@ export function PrHeader(props: {
             {title ?? <Skeleton width={360} height={12} />}
           </span>
           {props.review?.verdict ? (
-            <span className={`verdict-chip is-${props.review.verdict}`}>
+            <span className={`verdict-chip is-${props.review.verdict}${props.updated ? " is-stale" : ""}`}>
               <Glyph verdict={props.review.verdict} />
               {VERDICT_LABEL[props.review.verdict]}
             </span>
           ) : null}
+          {props.updated ? <span className="pr-updated">updated</span> : null}
           {summary && !props.expanded ? <span className="pr-desc">{summary}</span> : null}
           {pr.risk && !props.expanded ? <span className="pr-risk-mark">Risk</span> : null}
           {props.expanded ? null : <div className="pr-popover">{details}</div>}
