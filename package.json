@@ -31,5 +31,6 @@
   "prettier": {
     "semi": false,
     "printWidth": 140
-  }
+  },
+  "packageManager": "bun@1.4.2"
 }
