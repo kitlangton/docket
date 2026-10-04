@@ -1,9 +1,9 @@
 import { DIFFS_TAG_NAME, type SelectedLineRange } from "@pierre/diffs"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { Note, PrReview, ReviewState, SessionPayload, Side, Verdict } from "../src/types"
+import { itemLabel, type Note, type PrReview, type ReviewState, type SessionPayload, type Side, type Verdict } from "../src/types"
 import { FileBlock, type Draft } from "./diff"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
-import { Help, PrHeader, PrNotes, Prompt, Rail, StatusBar, Summary } from "./views"
+import { HandedBack, Help, PrHeader, PrNotes, PrSkeleton, Prompt, Rail, StatusBar, Summary, VerdictPrompt } from "./views"
 
 export function App() {
   const [session, setSession] = useState<SessionPayload>()
@@ -28,27 +28,8 @@ export function App() {
     return () => clearInterval(timer)
   }, [])
 
-  if (!session || !state) return <div className="splash">docket</div>
-  const ready = session.progress.done >= session.progress.total || session.progress.phase === "Ready"
-  if (!ready) return <Loading session={session} />
+  if (!session || !state) return <div className="splash" />
   return <Deck session={session} initial={state} />
-}
-
-function Loading(props: { session: SessionPayload }) {
-  const progress = props.session.progress
-  return (
-    <div className="splash">
-      <div className="loading">
-        <div className="loading-title">{props.session.manifest.title}</div>
-        <div className="progress-bar wide">
-          <span style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }} />
-        </div>
-        <div className="muted">
-          {progress.phase} · {progress.done}/{progress.total}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 type PromptState = { kind: "reject" } | { kind: "note"; noteId?: string; initial: string }
@@ -72,8 +53,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const [cursorMode, setCursorMode] = useState<"block" | "line">("block")
   const [visual, setVisual] = useState<Visual | null>(null)
   const [noteFocus, setNoteFocus] = useState<number | null>(null)
-  const [diffStyle, setDiffStyle] = useState<"split" | "unified">(
-    () => (localStorage.getItem("docket.diffStyle") === "unified" ? "unified" : "split"),
+  const [diffStyle, setDiffStyle] = useState<"split" | "unified">(() =>
+    localStorage.getItem("docket.diffStyle") === "unified" ? "unified" : "split",
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [help, setHelp] = useState(false)
@@ -82,6 +63,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const [summaryIndex, setSummaryIndex] = useState(0)
   const [handedBack, setHandedBack] = useState<string | null>(null)
   const [folds, setFolds] = useState<Record<string, boolean>>({})
+  const [stamped, setStamped] = useState<string | null>(null)
   const mainRef = useRef<HTMLDivElement>(null)
   const scrollIntent = useRef<ScrollIntent>("top")
   const pendingG = useRef(0)
@@ -167,6 +149,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const decide = (verdict: Verdict, reason?: string) => {
     const next = nextUnreviewed(order, { ...state, reviews: { ...state.reviews, [current]: { ...EMPTY_REVIEW, verdict } } }, current)
     updateReview(current, (prev) => ({ ...prev, verdict, reason: verdict === "reject" ? reason || undefined : undefined }))
+    setStamped(current)
+    setTimeout(() => setStamped((value) => (value === current ? null : value)), 400)
     if (next === undefined) {
       setSummaryIndex(order.indexOf(current))
       setView("summary")
@@ -189,7 +173,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       setVisual(null)
       setCursorMode("line")
       setCursors((prev) => ({ ...prev, [current]: Math.max(a, b) }))
-      setDraft({ path, side: anchor.side, startLine: anchor.startLine, line: anchor.line, body: existing?.body ?? "", noteId: existing?.id })
+      setDraft({
+        path,
+        side: anchor.side,
+        startLine: anchor.startLine,
+        line: anchor.line,
+        body: existing?.body ?? "",
+        noteId: existing?.id,
+      })
     },
     [model, state.reviews, current],
   )
@@ -577,7 +568,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       ? `${model.files[cursor.file]?.name.split("/").at(-1)}:${cursor.side === "deletions" ? "L" : "R"}${cursor.line}`
       : ""
 
-  if (handedBack) return <HandedBack path={handedBack} />
+  if (handedBack) return <HandedBack path={handedBack} state={state} order={order} />
 
   return (
     <div className="app">
@@ -586,6 +577,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         items={session.items}
         state={state}
         current={current}
+        stamped={stamped}
         onSelect={(id) => {
           setView("deck")
           goTo(id)
@@ -599,6 +591,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
           state={state}
           selected={summaryIndex}
           outPath={session.outPath}
+          onHandBack={handBack}
           onOpen={(id) => {
             goTo(id)
             setView("deck")
@@ -606,39 +599,55 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         />
       ) : (
         <main className="main" ref={mainRef}>
-          <PrHeader entry={entry} load={load} review={review} state={state} total={order.length} />
-          <PrNotes
-            notes={prNotes}
-            focus={cursorIndex === HEADER ? noteFocus : null}
-            onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
-            onDelete={deleteNote}
-          />
-          {load && !load.ok ? <div className="error">Could not load {current}: {load.error}</div> : null}
-          {model && model.files.length === 0 ? <div className="empty">No file changes{ignoreWhitespace ? " outside whitespace" : ""}.</div> : null}
-          <div className="files" key={`${current}-${ignoreWhitespace}`}>
-            {model?.files.map((file, index) => (
-              <FileBlock
-                key={file.name}
-                index={index}
-                file={file}
-                focus={model.focus.has(file.name)}
-                collapsed={isCollapsed(index)}
-                cursorHere={cursor?.file === index}
-                notes={notesByFile.get(file.name) ?? NO_NOTES}
-                draft={draft && draft.path === file.name ? draft : null}
-                selection={selectionFor(index)}
-                visual={Boolean(visual) && cursor?.file === index}
-                diffStyle={diffStyle}
-                onLine={clickLine}
-                onRange={pickRange}
-                onSaveDraft={saveDraft}
-                onCancelDraft={cancelDraft}
-                onEditNote={editNote}
-                onToggle={toggleFold}
+          <div className="pr-view view-enter" key={current}>
+            <PrHeader entry={entry} load={load} review={review} state={state} total={order.length} />
+            <PrNotes
+              notes={prNotes}
+              focus={cursorIndex === HEADER ? noteFocus : null}
+              onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
+              onDelete={deleteNote}
+            />
+            {load && !load.ok ? (
+              <div className="error">
+                Could not load {current}: {load.error}
+              </div>
+            ) : null}
+            {model && model.files.length === 0 ? (
+              <div className="empty">No file changes{ignoreWhitespace ? " outside whitespace" : ""}.</div>
+            ) : null}
+            <div className="files" key={`${current}-${ignoreWhitespace}`}>
+              {model?.files.map((file, index) => (
+                <FileBlock
+                  key={file.name}
+                  index={index}
+                  file={file}
+                  focus={model.focus.has(file.name)}
+                  collapsed={isCollapsed(index)}
+                  cursorHere={cursor?.file === index}
+                  notes={notesByFile.get(file.name) ?? NO_NOTES}
+                  draft={draft && draft.path === file.name ? draft : null}
+                  selection={selectionFor(index)}
+                  visual={Boolean(visual) && cursor?.file === index}
+                  diffStyle={diffStyle}
+                  onLine={clickLine}
+                  onRange={pickRange}
+                  onSaveDraft={saveDraft}
+                  onCancelDraft={cancelDraft}
+                  onEditNote={editNote}
+                  onToggle={toggleFold}
+                />
+              ))}
+            </div>
+            {load ? (
+              <VerdictPrompt
+                label={itemLabel(entry.pr)}
+                verdict={review?.verdict}
+                onDecide={(verdict) => (verdict === "reject" ? setPrompt({ kind: "reject" }) : decide(verdict))}
               />
-            ))}
+            ) : (
+              <PrSkeleton />
+            )}
           </div>
-          <div className="end-of-pr">End of {entry.pr.number ? `#${entry.pr.number}` : entry.pr.ref}</div>
         </main>
       )}
       {visual?.pill ? (
@@ -688,17 +697,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
 }
 
 const NO_NOTES: Note[] = []
-
-function HandedBack(props: { path: string }) {
-  return (
-    <div className="splash">
-      <div className="handed-back">
-        <div className="handed-back-title">Handed back</div>
-        <p>Verdicts are in {props.path}. You can close this tab.</p>
-      </div>
-    </div>
-  )
-}
 
 function rowElement(main: HTMLElement, row: Row) {
   const section = main.querySelector<HTMLElement>(`[data-file-index="${row.file}"]`)

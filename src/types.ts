@@ -88,9 +88,7 @@ export type SessionPayload = {
   items: Record<string, ItemLoad>
 }
 
-export type VerdictNote =
-  | { body: string }
-  | { path: string; side: "LEFT" | "RIGHT"; startLine?: number; line: number; body: string }
+export type VerdictNote = { body: string } | { path: string; side: "LEFT" | "RIGHT"; startLine?: number; line: number; body: string }
 
 export type VerdictsFile = {
   session: string

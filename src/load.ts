@@ -106,12 +106,15 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
   const [headOid, mb] = await Promise.all([revParse(manifest, head), mergeBase(manifest, base, head)])
   const [[patch, patchIgnoreWhitespace], branch, subject, commits, numstat] = await Promise.all([
     diffPair(manifest, mb, headOid),
-    run([...git(manifest), "rev-parse", "--abbrev-ref", head]).then((out) => out.trim()).catch(() => ""),
+    run([...git(manifest), "rev-parse", "--abbrev-ref", head])
+      .then((out) => out.trim())
+      .catch(() => ""),
     run([...git(manifest), "log", "-1", "--format=%s", headOid]).then((out) => out.trim()),
     run([...git(manifest), "rev-list", "--count", `${mb}..${headOid}`]).then((out) => Number(out.trim())),
     run([...git(manifest), "diff", "--numstat", "-M", mb, headOid]),
   ])
-  if (patch.length > MAX_PATCH_BYTES) throw new Error(`diff is too large to review (${Math.round(patch.length / 1e6)} MB); pass a narrower <base>..<head>`)
+  if (patch.length > MAX_PATCH_BYTES)
+    throw new Error(`diff is too large to review (${Math.round(patch.length / 1e6)} MB); pass a narrower <base>..<head>`)
   const stats = numstat
     .split("\n")
     .filter(Boolean)
@@ -141,7 +144,9 @@ async function loadRef(manifest: Manifest, item: ManifestItem): Promise<ItemLoad
 export async function defaultBase(manifest: Manifest, head = "HEAD") {
   if (manifest.repo.base) return `origin/${manifest.repo.base}`
   const [originHead, refs] = await Promise.all([
-    run([...git(manifest), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).then((out) => out.trim()).catch(() => ""),
+    run([...git(manifest), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+      .then((out) => out.trim())
+      .catch(() => ""),
     run([...git(manifest), "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"]).catch(() => ""),
   ])
   const trunks = refs

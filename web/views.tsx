@@ -1,23 +1,50 @@
-import { useEffect, useRef, useState } from "react"
-import { itemId, itemLabel, type ItemLoad, type Manifest, type Note, type PrReview, type ReviewState, type Verdict } from "../src/types"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import {
+  itemId,
+  itemLabel,
+  type ItemLoad,
+  type Manifest,
+  type ManifestGroup,
+  type Note,
+  type PrReview,
+  type ReviewState,
+  type Verdict,
+} from "../src/types"
 import { countVerdicts, displayTitle, noteCount, noteLocation, type Entry } from "./model"
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
 const STATE_LABEL = { OPEN: "Open", MERGED: "Merged", CLOSED: "Closed", LOCAL: "Local" }
-const VERDICT_GLYPH: Record<Verdict, string> = { approve: "✓", reject: "✕", skip: "–" }
 
-export function Glyph(props: { verdict: Verdict | null | undefined }) {
-  if (!props.verdict) return <span className="glyph">○</span>
-  return <span className={`glyph is-${props.verdict}`}>{VERDICT_GLYPH[props.verdict]}</span>
+/** Verdict glyph drawn on a 14px grid so it stays crisp at any zoom. */
+export function Glyph(props: { verdict: Verdict | null | undefined; stamp?: boolean }) {
+  const className = `glyph${props.verdict ? ` is-${props.verdict}` : ""}${props.stamp ? " is-stamp" : ""}`
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+      {props.verdict === "approve" ? <path d="M3.5 7.4l2.3 2.3 4.7-5" /> : null}
+      {props.verdict === "reject" ? <path d="M4.2 4.2l5.6 5.6M9.8 4.2l-5.6 5.6" /> : null}
+      {props.verdict === "skip" ? <path d="M4 7h6M7.6 4.6L10 7l-2.4 2.4" /> : null}
+      {!props.verdict ? <circle cx="7" cy="7" r="3.6" /> : null}
+    </svg>
+  )
 }
 
-export function VerdictLabel(props: { verdict: Verdict | null | undefined }) {
-  if (!props.verdict) return <span className="verdict-label">Unreviewed</span>
+export function Keys(props: { children: string }) {
   return (
-    <span className={`verdict-label is-${props.verdict}`}>
-      {VERDICT_GLYPH[props.verdict]} {VERDICT_LABEL[props.verdict]}
+    <span className="keys">
+      {props.children.split(" ").map((key) => (
+        <kbd key={key}>{key}</kbd>
+      ))}
     </span>
   )
+}
+
+function Skeleton(props: { width: number | string; height?: number }) {
+  return <span className="skeleton" style={{ width: props.width, height: props.height ?? 10 }} />
+}
+
+function groupProgress(group: ManifestGroup, state: ReviewState) {
+  const ids = group.prs.map(itemId)
+  return { done: ids.filter((id) => state.reviews[id]?.verdict).length, total: ids.length }
 }
 
 export function Rail(props: {
@@ -25,93 +52,135 @@ export function Rail(props: {
   items: Record<string, ItemLoad>
   state: ReviewState
   current: string
+  stamped: string | null
   onSelect: (id: string) => void
 }) {
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
     ref.current?.querySelector(".rail-pr.is-current")?.scrollIntoView({ block: "nearest" })
   }, [props.current])
+  const ids = props.manifest.groups.flatMap((group) => group.prs.map(itemId))
+  const done = ids.filter((id) => props.state.reviews[id]?.verdict).length
+  const loading = ids.filter((id) => !props.items[id]).length
   return (
     <nav className="rail" ref={ref}>
-      <div className="rail-title">{props.manifest.title}</div>
-      {props.manifest.groups.map((group) => (
-        <div className="rail-group" key={group.title}>
-          <div className="rail-group-title">{group.title}</div>
-          {group.why ? (
-            <div className="rail-group-why" title={group.why}>
-              {group.why}
-            </div>
-          ) : null}
-          {group.prs.map((pr) => {
-            const id = itemId(pr)
-            const load = props.items[id]
-            const review = props.state.reviews[id]
-            const notes = noteCount(review)
-            const title = load?.ok ? displayTitle(load.data.meta.title) : load ? "Failed to load" : "Loading…"
-            return (
-              <button
-                key={id}
-                className={`rail-pr${id === props.current ? " is-current" : ""}${review?.verdict ? " is-done" : ""}`}
-                title={pr.after?.length ? `${title}\nAfter ${pr.after.map((n) => `#${n}`).join(", ")}` : title}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => props.onSelect(id)}
-              >
-                <Glyph verdict={review?.verdict} />
-                <span className="rail-pr-title">{title}</span>
-                {notes ? <span className="rail-notes">{notes}</span> : null}
-                <span className="rail-num">{pr.number ?? ""}</span>
-              </button>
-            )
-          })}
+      <div className="rail-head">
+        <div className="rail-title" title={props.manifest.summary ?? props.manifest.title}>
+          {props.manifest.title}
         </div>
-      ))}
+        <div className="rail-progress">
+          <span className="meter">
+            <span style={{ width: `${(done / Math.max(1, ids.length)) * 100}%` }} />
+          </span>
+          <span className="tabular">{loading ? `Loading ${ids.length - loading}/${ids.length}` : `${done}/${ids.length}`}</span>
+        </div>
+      </div>
+      {props.manifest.groups.map((group) => {
+        const progress = groupProgress(group, props.state)
+        const isCurrentGroup = group.prs.some((pr) => itemId(pr) === props.current)
+        const single = props.manifest.groups.length === 1
+        return (
+          <section className={`rail-group${isCurrentGroup ? " is-current" : ""}`} key={group.title}>
+            {single ? null : (
+              <div className="rail-group-head" title={group.why}>
+                <span className="rail-group-title">{group.title}</span>
+                <span className={`rail-group-count tabular${progress.done === progress.total ? " is-done" : ""}`}>
+                  {progress.done}/{progress.total}
+                </span>
+              </div>
+            )}
+            {isCurrentGroup && group.why && !single ? <p className="rail-group-why">{group.why}</p> : null}
+            {group.prs.map((pr) => {
+              const id = itemId(pr)
+              const load = props.items[id]
+              const review = props.state.reviews[id]
+              const notes = noteCount(review)
+              const title = load?.ok ? displayTitle(load.data.meta.title) : load ? "Failed to load" : null
+              return (
+                <button
+                  key={id}
+                  className={`rail-pr${id === props.current ? " is-current" : ""}${review?.verdict ? " is-done" : ""}`}
+                  title={pr.after?.length ? `${title ?? ""}\nAfter ${pr.after.map((n) => `#${n}`).join(", ")}` : (title ?? "")}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => props.onSelect(id)}
+                >
+                  <Glyph verdict={review?.verdict} stamp={props.stamped === id} />
+                  <span className="rail-pr-title">{title ?? <Skeleton width="70%" />}</span>
+                  {notes ? <span className="rail-notes tabular">{notes}</span> : null}
+                  <span className="rail-num tabular">{pr.number ?? ""}</span>
+                </button>
+              )
+            })}
+          </section>
+        )
+      })}
     </nav>
   )
 }
 
-export function PrHeader(props: { entry: Entry; load: ItemLoad | undefined; review: PrReview | undefined; state: ReviewState; total: number }) {
+export function PrHeader(props: {
+  entry: Entry
+  load: ItemLoad | undefined
+  review: PrReview | undefined
+  state: ReviewState
+  total: number
+}) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
   const stats = meta
     ? [
         meta.commits ? `${meta.commits} commit${meta.commits === 1 ? "" : "s"}` : null,
         `${meta.changedFiles} file${meta.changedFiles === 1 ? "" : "s"}`,
-        meta.additions ? `+${meta.additions}` : null,
-        meta.deletions ? `−${meta.deletions}` : null,
       ].filter((value) => value !== null)
     : []
   return (
     <header className="pr-header">
       <div className="pr-context">
         <span>{props.entry.group.title}</span>
-        <span className="dot-sep">·</span>
-        <span>
+        <span className="sep" />
+        <span className="tabular">
           {props.entry.index + 1} of {props.total}
         </span>
-        <span className="dot-sep">·</span>
-        <span>{itemLabel(props.entry.pr)}</span>
+        <span className="sep" />
+        <span className="tabular">{itemLabel(props.entry.pr)}</span>
         {meta && meta.state !== "OPEN" ? <span className="pr-state">{STATE_LABEL[meta.state]}</span> : null}
         <span className="spacer" />
-        {props.review?.verdict ? <VerdictLabel verdict={props.review.verdict} /> : null}
+        {props.review?.verdict ? (
+          <span className={`verdict-chip is-${props.review.verdict}`}>
+            <Glyph verdict={props.review.verdict} />
+            {VERDICT_LABEL[props.review.verdict]}
+          </span>
+        ) : null}
         {meta?.url ? (
-          <a href={meta.url} target="_blank" rel="noreferrer">
-            GitHub ↗
+          <a className="pr-link" href={meta.url} target="_blank" rel="noreferrer">
+            GitHub
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+              <path d="M3 2h5v5M8 2L2.5 7.5" />
+            </svg>
           </a>
         ) : null}
       </div>
-      <h1>{meta ? displayTitle(meta.title) : "Loading…"}</h1>
+      <h1>{meta ? displayTitle(meta.title) : <Skeleton width={420} height={18} />}</h1>
       {props.entry.pr.why ? <p className="pr-why">{props.entry.pr.why}</p> : null}
-      <div className="pr-stats">
-        {stats.join(" · ")}
-        {props.entry.pr.after?.map((number) => (
-          <span key={number}>
-            {" · "}after #{number}
-            {props.state.reviews[number]?.verdict ? <> <Glyph verdict={props.state.reviews[number]?.verdict} /></> : null}
-          </span>
-        ))}
+      <div className="pr-stats tabular">
+        {meta ? (
+          <>
+            {stats.join(" · ")}
+            {meta.additions ? <span className="add"> +{meta.additions}</span> : null}
+            {meta.deletions ? <span className="del"> −{meta.deletions}</span> : null}
+            {props.entry.pr.after?.map((number) => (
+              <span key={number} className="after">
+                after #{number}
+                <Glyph verdict={props.state.reviews[number]?.verdict} />
+              </span>
+            ))}
+          </>
+        ) : (
+          <Skeleton width={160} />
+        )}
       </div>
       {props.review?.reason ? (
-        <p className="pr-aside">
-          <span className="pr-aside-label">Reject reason</span>
+        <p className="pr-reason">
+          <span>Rejected</span>
           {props.review.reason}
         </p>
       ) : null}
@@ -130,16 +199,78 @@ export function PrNotes(props: { notes: Note[]; focus: number | null; onEdit: (n
           </span>
           <span className="pr-note-actions">
             {props.focus === index ? (
-              <span className="pr-note-keys">
-                <kbd>e</kbd> edit <kbd>d</kbd> delete
-              </span>
-            ) : null}
-            <button onClick={() => props.onEdit(note)}>Edit</button>
-            <button onClick={() => props.onDelete(note.id)}>Delete</button>
+              <>
+                <span>
+                  <kbd>e</kbd> edit
+                </span>
+                <span>
+                  <kbd>d</kbd> delete
+                </span>
+              </>
+            ) : (
+              <>
+                <button onClick={() => props.onEdit(note)}>Edit</button>
+                <button onClick={() => props.onDelete(note.id)}>Delete</button>
+              </>
+            )}
           </span>
         </li>
       ))}
     </ul>
+  )
+}
+
+/** Closes a PR: where the eye lands after the last hunk, with the verdict keys right there. */
+export function VerdictPrompt(props: { label: string; verdict: Verdict | null | undefined; onDecide: (verdict: Verdict) => void }) {
+  if (props.verdict) {
+    return (
+      <div className={`verdict-prompt is-decided is-${props.verdict}`}>
+        <Glyph verdict={props.verdict} />
+        <span>
+          {VERDICT_LABEL[props.verdict]} {props.label}
+        </span>
+        <span className="spacer" />
+        <span className="hint">
+          <kbd>u</kbd> clear
+        </span>
+        <span className="hint">
+          <kbd>J</kbd> next
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="verdict-prompt">
+      <span className="verdict-prompt-label">Verdict on {props.label}</span>
+      <span className="spacer" />
+      <VerdictButton verdict="approve" k="a" label="Approve" onDecide={props.onDecide} />
+      <VerdictButton verdict="reject" k="r" label="Reject" onDecide={props.onDecide} />
+      <VerdictButton verdict="skip" k="s" label="Skip" onDecide={props.onDecide} />
+    </div>
+  )
+}
+
+function VerdictButton(props: { verdict: Verdict; k: string; label: string; onDecide: (verdict: Verdict) => void }) {
+  return (
+    <button
+      className={`verdict-button is-${props.verdict}`}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => props.onDecide(props.verdict)}
+    >
+      <Glyph verdict={props.verdict} />
+      {props.label}
+      <kbd>{props.k}</kbd>
+    </button>
+  )
+}
+
+export function PrSkeleton() {
+  return (
+    <div className="pr-skeleton" aria-hidden>
+      {[92, 64, 78, 40, 86, 58, 70, 30].map((width, index) => (
+        <Skeleton key={index} width={`${width}%`} />
+      ))}
+    </div>
   )
 }
 
@@ -149,16 +280,13 @@ export function StatusBar(props: { order: string[]; state: ReviewState; mode: st
   return (
     <footer className="status">
       <span className="status-left">
-        <span>
+        <span className="hint">
           <kbd>?</kbd> keys
         </span>
         {props.position ? <span className="muted">{props.position}</span> : null}
         {props.mode ? <span className="muted">{props.mode}</span> : null}
       </span>
-      <span className="progress">
-        <span className="progress-bar">
-          <span style={{ width: `${(reviewed / Math.max(1, props.order.length)) * 100}%` }} />
-        </span>
+      <span className="status-right tabular">
         {reviewed} of {props.order.length} reviewed
       </span>
     </footer>
@@ -167,36 +295,39 @@ export function StatusBar(props: { order: string[]; state: ReviewState; mode: st
 
 const HELP: [string, [string, string][]][] = [
   [
-    "Move",
+    "Navigate",
     [
-      ["j  k", "Next / previous change"],
-      ["⌃n  ⌃p", "Next / previous line"],
-      ["]  [", "Next / previous file"],
-      ["J  K", "Next / previous PR"],
-      ["gg  G", "Top / bottom of PR"],
-      ["⌃d  ⌃u", "Half page down / up"],
+      ["j k", "Next / previous change"],
+      ["⌃n ⌃p", "Next / previous line"],
+      ["] [", "Next / previous file"],
+      ["J K", "Next / previous PR"],
+      ["g g", "Top of PR"],
+      ["G", "Bottom of PR"],
+      ["⌃d ⌃u", "Half page down / up"],
     ],
   ],
   [
     "Review",
     [
-      ["a", "Approve and advance"],
-      ["r", "Reject with reason and advance"],
-      ["s", "Skip and advance"],
+      ["a", "Approve, then next"],
+      ["r", "Reject with a reason"],
+      ["s", "Skip, then next"],
       ["u", "Clear verdict"],
       ["n", "Note on the PR"],
-      ["V  v", "Select lines, then n to comment"],
+      ["V", "Select lines to comment"],
+      ["e d", "Edit / delete a PR note"],
     ],
   ],
   [
     "View",
     [
-      ["o  ⏎", "Fold / unfold file"],
+      ["o", "Fold / unfold file"],
       ["t", "Split / unified"],
       ["z", "Ignore whitespace"],
       ["O", "Open on GitHub"],
-      ["⏎  :", "Summary"],
-      ["w", "Write verdicts (in summary)"],
+      [":", "Summary"],
+      ["w", "Hand back (in summary)"],
+      ["?", "Toggle this help"],
     ],
   ],
 ]
@@ -209,9 +340,11 @@ export function Help(props: { onClose: () => void }) {
           <section key={title}>
             <h2>{title}</h2>
             <dl>
-              {rows.map(([key, label]) => (
-                <div key={key}>
-                  <dt>{key}</dt>
+              {rows.map(([keys, label]) => (
+                <div key={keys}>
+                  <dt>
+                    <Keys>{keys}</Keys>
+                  </dt>
                   <dd>{label}</dd>
                 </div>
               ))}
@@ -244,7 +377,7 @@ export function Prompt(props: {
         <textarea
           ref={ref}
           value={value}
-          rows={props.multiline ? 5 : 2}
+          rows={props.multiline ? 4 : 2}
           placeholder={props.placeholder}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
@@ -256,7 +389,17 @@ export function Prompt(props: {
             }
           }}
         />
-        <div className="draft-hint">Enter to confirm · Shift-Enter for newline · Esc to cancel</div>
+        <div className="prompt-hint">
+          <span>
+            <kbd>↵</kbd> save
+          </span>
+          <span>
+            <kbd>⇧↵</kbd> newline
+          </span>
+          <span>
+            <kbd>esc</kbd> cancel
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -270,59 +413,125 @@ export function Summary(props: {
   selected: number
   outPath: string
   onOpen: (id: string) => void
+  onHandBack: () => void
 }) {
   const order = props.entries.map((entry) => entry.id)
   const counts = countVerdicts(order, props.state)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    ref.current?.querySelector(".summary-row.is-selected")?.scrollIntoView({ block: "nearest" })
+    ref.current?.querySelector(".ledger-row.is-selected")?.scrollIntoView({ block: "nearest" })
   }, [props.selected])
+  const selectedId = order[props.selected]
   return (
-    <div className="summary" ref={ref}>
+    <div className="summary view-enter" ref={ref}>
       <div className="summary-inner">
         <div className="pr-context">Summary</div>
         <h1>{props.manifest.title}</h1>
-        <p className="summary-counts">
-          <span className="is-approve">{counts.approve} approved</span>
-          <span className="dot-sep">·</span>
-          <span className="is-reject">{counts.reject} rejected</span>
-          <span className="dot-sep">·</span>
-          <span className="is-skip">{counts.skip} skipped</span>
-          <span className="dot-sep">·</span>
-          <span>{counts.unreviewed} unreviewed</span>
-        </p>
-        <p className="summary-write">
-          <kbd>w</kbd> hands back: writes <span className="mono">{props.outPath}</span> and closes docket
-        </p>
-        <div className="summary-list">
-          {props.entries.map((entry, index) => {
-            const load = props.items[entry.id]
-            const review = props.state.reviews[entry.id]
-            return (
-              <div
-                key={entry.id}
-                className={`summary-row${index === props.selected ? " is-selected" : ""}`}
-                onClick={() => props.onOpen(entry.id)}
-              >
-                <div className="summary-head">
-                  <Glyph verdict={review?.verdict} />
-                  <span className="summary-pr-title">{load?.ok ? displayTitle(load.data.meta.title) : ""}</span>
-                  <span className="rail-num">{itemLabel(entry.pr)}</span>
-                </div>
-                {review?.reason ? <div className="summary-detail">{review.reason}</div> : null}
-                {review?.notes.map((note) => (
-                  <div key={note.id} className="summary-detail">
-                    <span className="loc">
-                      {note.path ? noteLocation(note) : "PR"}
-                    </span>
-                    {note.body}
-                  </div>
-                ))}
-              </div>
-            )
-          })}
+        {props.manifest.summary ? <p className="pr-why">{props.manifest.summary}</p> : null}
+        <div className="stats">
+          <Stat value={counts.approve} label="Approved" kind="approve" />
+          <Stat value={counts.reject} label="Rejected" kind="reject" />
+          <Stat value={counts.skip} label="Skipped" kind="skip" />
+          <Stat value={counts.unreviewed} label="Unreviewed" kind="none" />
         </div>
-        <div className="summary-foot">j k move · ⏎ open · Esc back</div>
+        <div className="handback">
+          <div>
+            <div className="handback-title">Hand back to the agent</div>
+            <div className="handback-path">{props.outPath}</div>
+          </div>
+          <button className="handback-button" onMouseDown={(event) => event.preventDefault()} onClick={props.onHandBack}>
+            <kbd>w</kbd> Hand back
+          </button>
+        </div>
+        {props.manifest.groups.map((group) => {
+          const progress = groupProgress(group, props.state)
+          return (
+            <section className="ledger-group" key={group.title}>
+              {props.manifest.groups.length > 1 ? (
+                <div className="ledger-group-head">
+                  <span>{group.title}</span>
+                  <span className="tabular">
+                    {progress.done}/{progress.total}
+                  </span>
+                </div>
+              ) : null}
+              {group.prs.map((pr) => {
+                const id = itemId(pr)
+                const load = props.items[id]
+                const review = props.state.reviews[id]
+                return (
+                  <div key={id} className={`ledger-row${id === selectedId ? " is-selected" : ""}`} onClick={() => props.onOpen(id)}>
+                    <div className="ledger-head">
+                      <Glyph verdict={review?.verdict} />
+                      <span className="ledger-title">{load?.ok ? displayTitle(load.data.meta.title) : itemLabel(pr)}</span>
+                      <span className="rail-num tabular">{itemLabel(pr)}</span>
+                    </div>
+                    {review?.reason ? (
+                      <LedgerLine tag="Reason" tone="reject">
+                        {review.reason}
+                      </LedgerLine>
+                    ) : null}
+                    {review?.notes.map((note) => (
+                      <LedgerLine key={note.id} tag={note.path ? noteLocation(note) : "Note"}>
+                        {note.body}
+                      </LedgerLine>
+                    ))}
+                  </div>
+                )
+              })}
+            </section>
+          )
+        })}
+        <div className="summary-foot">
+          <span>
+            <Keys>j k</Keys> move
+          </span>
+          <span>
+            <kbd>↵</kbd> open
+          </span>
+          <span>
+            <kbd>esc</kbd> back
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LedgerLine(props: { tag: string; tone?: string; children: ReactNode }) {
+  return (
+    <div className={`ledger-line${props.tone ? ` is-${props.tone}` : ""}`}>
+      <span className="ledger-tag">{props.tag}</span>
+      <span className="ledger-body">{props.children}</span>
+    </div>
+  )
+}
+
+function Stat(props: { value: number; label: string; kind: string }) {
+  return (
+    <div className={`stat is-${props.kind}`}>
+      <span className="stat-value tabular">{props.value}</span>
+      <span className="stat-label">{props.label}</span>
+    </div>
+  )
+}
+
+export function HandedBack(props: { path: string; state: ReviewState; order: string[] }) {
+  const counts = countVerdicts(props.order, props.state)
+  return (
+    <div className="splash view-enter">
+      <div className="handed-back">
+        <svg className="handed-back-mark" width="40" height="40" viewBox="0 0 40 40" aria-hidden>
+          <circle cx="20" cy="20" r="19" />
+          <path d="M13 20.5l4.8 4.8L27.5 15" />
+        </svg>
+        <h1>Handed back</h1>
+        <p className="tabular">
+          {counts.approve} approved · {counts.reject} rejected · {counts.skip} skipped
+          {counts.unreviewed ? ` · ${counts.unreviewed} unreviewed` : ""}
+        </p>
+        <p className="handed-back-path">{props.path}</p>
+        <p className="muted">You can close this tab.</p>
       </div>
     </div>
   )

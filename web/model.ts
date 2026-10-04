@@ -1,5 +1,14 @@
 import { parsePatchFiles, type FileDiffMetadata, type SelectedLineRange } from "@pierre/diffs"
-import { itemId, type Manifest, type ManifestGroup, type ManifestItem, type PrReview, type ReviewState, type Side, type Verdict } from "../src/types"
+import {
+  itemId,
+  type Manifest,
+  type ManifestGroup,
+  type ManifestItem,
+  type PrReview,
+  type ReviewState,
+  type Side,
+  type Verdict,
+} from "../src/types"
 
 export type Row = { file: number; side: Side; line: number; kind: "context" | "add" | "del"; block: number | null }
 export type Block = { file: number; first: number; last: number; range: SelectedLineRange }
@@ -36,12 +45,8 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
         const continues = hunk.hunkContent[contentIndex - 1]?.type === "change"
         const block = continues ? blocks.length - 1 : blocks.length
         const first = continues ? blocks[block]!.first : rows.length
-        range(content.deletions).forEach(() =>
-          rows.push({ file: fileIndex, side: "deletions", line: pos.old++, kind: "del", block }),
-        )
-        range(content.additions).forEach(() =>
-          rows.push({ file: fileIndex, side: "additions", line: pos.new++, kind: "add", block }),
-        )
+        range(content.deletions).forEach(() => rows.push({ file: fileIndex, side: "deletions", line: pos.old++, kind: "del", block }))
+        range(content.additions).forEach(() => rows.push({ file: fileIndex, side: "additions", line: pos.new++, kind: "add", block }))
         const start = rows[first]!
         const end = rows[rows.length - 1]!
         blocks[block] = {

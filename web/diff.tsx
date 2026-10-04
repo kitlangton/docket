@@ -30,52 +30,58 @@ export type FileBlockProps = {
 
 // Injected into the diff's shadow root. Keeps the diff chrome quiet and draws one cursor indicator.
 const BASE_CSS = /* css */ `
-[data-diffs-header] { position: sticky; top: 0; z-index: 3; min-height: 0; padding: 0; background: #0a0a0a; }
-[data-separator=line-info-basic] { height: 26px; background-color: transparent; }
+:host { --diffs-bg: var(--bg); background-color: var(--bg); }
+[data-diffs-header] { position: sticky; top: 0; z-index: 3; min-height: 0; padding: 0; background: var(--bg); }
+[data-separator=line-info-basic] { height: 28px; background-color: transparent; }
 [data-separator-wrapper], [data-separator-content] { background-color: transparent; }
-[data-separator-content] { color: #4b4f56; font-size: 11px; padding-left: 2ch; }
-[data-gutter] [data-separator=line-info-basic] { border-block: 1px solid #16181b; }
-[data-content] [data-separator=line-info-basic] { border-block: 1px solid #16181b; }
+[data-separator-content] { color: var(--text-4); font: 11px/1 var(--sans); padding-left: 2ch; }
+[data-gutter] [data-separator=line-info-basic], [data-content] [data-separator=line-info-basic] {
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+}
+[data-line], [data-no-newline] { --mix-dark: 88%; }
+[data-gutter-buffer], [data-column-number] { --mix-dark: 91%; }
+[data-content-buffer] { opacity: 0.5; }
+[data-line-annotation], [data-gutter-buffer=annotation] { --diffs-annotation-bg: var(--bg); }
 [data-line][data-selected-line], [data-column-number][data-selected-line] {
   --diffs-computed-selected-line-bg: var(--diffs-computed-diff-line-bg);
 }
-[data-line], [data-no-newline] { --mix-dark: 87%; }
-[data-gutter-buffer], [data-column-number] { --mix-dark: 90%; }
-[data-line-annotation], [data-gutter-buffer=annotation] { --diffs-annotation-bg: #0a0a0a; }
 [data-line-annotation][data-selected-line], [data-gutter-buffer][data-selected-line] {
   --diffs-computed-selected-line-bg: var(--diffs-computed-diff-line-bg);
   box-shadow: none;
 }
-[data-gutter-utility-slot] { opacity: 0; }
+[data-gutter-utility-slot] { opacity: 0; transition: opacity 120ms; }
 [data-column-number]:hover [data-gutter-utility-slot] { opacity: 1; }
-[data-utility-button] { background-color: #8aa0ff; border-radius: 3px; }
-[data-column-number][data-selected-line] { color: var(--diffs-fg-number); }
-[data-column-number][data-selected-line][data-line-type=change-addition] { color: var(--diffs-addition-base); }
-[data-column-number][data-selected-line][data-line-type=change-deletion] { color: var(--diffs-deletion-base); }
+[data-utility-button] { background-color: var(--accent); border-radius: 4px; }
+[data-column-number] { color: var(--text-4); }
+[data-column-number][data-line-type=change-addition] { color: var(--approve); }
+[data-column-number][data-line-type=change-deletion] { color: var(--reject); }
+[data-column-number][data-selected-line] { color: var(--text-4); }
+[data-column-number][data-selected-line][data-line-type=change-addition] { color: var(--approve); }
+[data-column-number][data-selected-line][data-line-type=change-deletion] { color: var(--reject); }
 `
 
 const CURSOR_CSS = /* css */ `
-[data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 rgba(138, 160, 255, 0.35); }
-[data-column-number]:is([data-selected-line=first], [data-selected-line=single]) { box-shadow: inset 2px 0 0 #8aa0ff; color: #f2f3f5; }
+[data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 40%, transparent); }
+[data-column-number]:is([data-selected-line=first], [data-selected-line=single]) { box-shadow: inset 2px 0 0 var(--accent); color: var(--text); }
 [data-line]:is([data-selected-line=first], [data-selected-line=single]) {
-  --diffs-computed-selected-line-bg: color-mix(in lab, var(--diffs-computed-diff-line-bg) 90%, #8aa0ff);
+  --diffs-computed-selected-line-bg: color-mix(in lab, var(--diffs-computed-diff-line-bg) 90%, var(--accent));
 }
 `
 
 // Visual mode tints every selected row so the range reads as one block.
 const VISUAL_CSS = /* css */ `
 [data-line][data-selected-line] {
-  --diffs-computed-selected-line-bg: color-mix(in lab, var(--diffs-computed-diff-line-bg) 76%, #8aa0ff);
+  --diffs-computed-selected-line-bg: color-mix(in lab, var(--diffs-computed-diff-line-bg) 78%, var(--accent));
 }
-[data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 #8aa0ff; color: #f2f3f5; }
+[data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 var(--accent); color: var(--text); }
 `
 
 export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
   const { onLine, onRange, onToggle, index } = props
   const options = useMemo<FileDiffOptions<AnnotationMeta, undefined>>(
     () => ({
-      theme: "pierre-dark",
-      themeType: "dark",
+      theme: { dark: "pierre-dark", light: "pierre-light" },
+      themeType: "system",
       diffStyle: props.diffStyle,
       diffIndicators: "none",
       hunkSeparators: "line-info-basic",
@@ -161,16 +167,26 @@ function FileHeader(props: {
   notes: number
   onToggle: (path: string) => void
 }) {
-  const counts = props.file.hunks.reduce(
-    (sum, hunk) => ({ add: sum.add + hunk.additionLines, del: sum.del + hunk.deletionLines }),
-    { add: 0, del: 0 },
-  )
+  const counts = props.file.hunks.reduce((sum, hunk) => ({ add: sum.add + hunk.additionLines, del: sum.del + hunk.deletionLines }), {
+    add: 0,
+    del: 0,
+  })
   const slash = props.file.name.lastIndexOf("/")
   const kind = KIND_LABEL[props.file.type]
   return (
-    <div className={`fh${props.collapsed ? " is-collapsed" : ""}${props.collapsed && props.cursorHere ? " is-cursor" : ""}`} onClick={() => props.onToggle(props.file.name)}>
+    <div
+      className={`fh${props.collapsed ? " is-collapsed" : ""}${props.collapsed && props.cursorHere ? " is-cursor" : ""}`}
+      onClick={() => props.onToggle(props.file.name)}
+    >
       <svg className="fh-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-        <path d={props.collapsed ? "M3.5 2l3 3-3 3" : "M2 3.5l3 3 3-3"} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d={props.collapsed ? "M3.5 2l3 3-3 3" : "M2 3.5l3 3 3-3"}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
       <span className="fh-path">
         {props.file.prevName ? <span className="fh-dir">{props.file.prevName} → </span> : null}

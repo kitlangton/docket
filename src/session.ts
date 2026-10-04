@@ -57,16 +57,29 @@ async function fromManifest(path: string, args: SessionArgs): Promise<Session> {
 async function adhocManifest(args: SessionArgs, repo: Manifest["repo"]): Promise<Manifest> {
   const numbers = args.positionals.map((arg) => arg.replace(/^#/, ""))
   if (numbers.length && numbers.every((arg) => /^\d+$/.test(arg))) {
-    return group(`${repo.github ?? basename(repo.path)} · ${numbers.map((n) => `#${n}`).join(" ")}`, repo, numbers.map((n) => ({ number: Number(n) })))
+    return group(
+      `${repo.github ?? basename(repo.path)} · ${numbers.map((n) => `#${n}`).join(" ")}`,
+      repo,
+      numbers.map((n) => ({ number: Number(n) })),
+    )
   }
   if (!args.positionals.length && (args.author || args.label || args.state)) {
     const listed = await listPrs(args, repo)
     if (!listed.length) throw new Error("gh pr list matched no pull requests")
-    return group(listTitle(args), repo, listed.map((number) => ({ number })))
+    return group(
+      listTitle(args),
+      repo,
+      listed.map((number) => ({ number })),
+    )
   }
   if (args.positionals.length === 1) {
     const ref = args.positionals[0]!
-    await Promise.all(ref.split(/\.\.\.?/).filter(Boolean).map((part) => verifyRef(repo.path, part)))
+    await Promise.all(
+      ref
+        .split(/\.\.\.?/)
+        .filter(Boolean)
+        .map((part) => verifyRef(repo.path, part)),
+    )
     return group(ref, repo, [{ ref }])
   }
   throw new Error("expected a manifest .json, PR numbers, a git ref or range, or --author/--label/--state")
