@@ -10,7 +10,7 @@ export type Draft = { path: string; side: Side; startLine?: number; line: number
 
 type AnnotationMeta = { kind: "note"; note: Note } | { kind: "draft"; draft: Draft } | { kind: "outdated"; notes: Note[] }
 
-export type FileBlockProps = {
+type FileBlockProps = {
   index: number
   file: FileDiffMetadata
   focus: boolean

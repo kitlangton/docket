@@ -1,14 +1,5 @@
 import { parsePatchFiles, type FileDiffMetadata, type SelectedLineRange } from "@pierre/diffs"
-import {
-  itemId,
-  type Manifest,
-  type ManifestGroup,
-  type ManifestItem,
-  type PrReview,
-  type ReviewState,
-  type Side,
-  type Verdict,
-} from "../src/types"
+import { itemId, type Manifest, type ManifestItem, type PrReview, type ReviewState, type Side, type Verdict } from "../src/types"
 
 /** `hunk` is the row's hunk index within its file, which names the context gaps around it. */
 export type Row = {
@@ -20,20 +11,18 @@ export type Row = {
   block: number | null
   text: string
 }
-export type Block = { file: number; first: number; last: number; range: SelectedLineRange }
+type Block = { file: number; first: number; range: SelectedLineRange }
 export type PrModel = { files: FileDiffMetadata[]; focus: Set<string>; rows: Row[]; blocks: Block[]; large: boolean }
 
 /** Past either limit, files start folded so the page stays fast; the file palette (f) is the way around. */
 const LARGE_FILES = 30
 const LARGE_LINES = 3000
-export type Entry = { id: string; pr: ManifestItem; group: ManifestGroup; index: number }
+export type Entry = { id: string; pr: ManifestItem }
 
 export const EMPTY_REVIEW: PrReview = { verdict: null, notes: [] }
 
-export function entries(manifest: Manifest) {
-  return manifest.groups
-    .flatMap((group) => group.prs.map((pr) => ({ id: itemId(pr), pr, group })))
-    .map((entry, index) => ({ ...entry, index }))
+export function entries(manifest: Manifest): Entry[] {
+  return manifest.groups.flatMap((group) => group.prs.map((pr) => ({ id: itemId(pr), pr })))
 }
 
 export function buildModel(patch: string, key: string, focusPaths: string[] = []): PrModel {
@@ -72,7 +61,6 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
         blocks[block] = {
           file: fileIndex,
           first,
-          last: rows.length - 1,
           range: { start: start.line, side: start.side, end: end.line, endSide: end.side },
         }
       })

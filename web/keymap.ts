@@ -4,7 +4,7 @@
  */
 
 export type Mode = "normal" | "visual" | "note" | "summary" | "home" | "tree"
-export type Group = "Navigate" | "Review" | "Folds" | "Commands" | "Inbox"
+type Group = "Navigate" | "Review" | "Folds" | "Commands" | "Inbox"
 
 export type Action =
   | "changeNext"
@@ -196,7 +196,7 @@ export const KEYMAP: Binding[] = [
 export const GROUPS: Group[] = ["Navigate", "Review", "Folds", "Commands", "Inbox"]
 
 // An ambiguous prefix (`]` before `] c`) waits this long before running the shorter binding.
-export const SEQUENCE_TIMEOUT = 400
+const SEQUENCE_TIMEOUT = 400
 // A pure prefix (`g`, `z`, `Z`) waits this long for the rest of its sequence.
 const PREFIX_TIMEOUT = 1000
 

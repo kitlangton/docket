@@ -164,7 +164,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     ...props.initial,
     current: props.initial.current && order.includes(props.initial.current) ? props.initial.current : order[0]!,
   }))
-  const current = state.current ?? order[0]!
+  const current = state.current!
   const [view, setView] = useState<"deck" | "summary">("deck")
   const [cursors, setCursors] = useState<Record<string, number>>({})
   const [cursorMode, setCursorMode] = useState<"block" | "line">("block")
@@ -175,7 +175,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [wrap, setWrap] = useState(() => localStorage.getItem("docket.wrap") === "on")
-  useEffect(() => localStorage.removeItem("docket.separator"), [])
   const [help, setHelp] = useState(false)
   const [palette, setPalette] = useState(false)
   const [treeOn, setTreeOn] = useState(() => localStorage.getItem("docket.tree") === "on")
@@ -194,7 +193,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const [pending, setPending] = useState("")
   const pendingRef = useRef<Pending>(EMPTY_PENDING)
   const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const [message, setMessage] = useState<{ text: string; at: number } | null>(null)
+  const [message, setMessage] = useState<{ text: string } | null>(null)
   const [bar, setBar] = useState<Bar | null>(null)
   const jumpsRef = useRef<{ list: Position[]; index: number }>({ list: [], index: 0 })
   const undoRef = useRef<{ id: string; before: VerdictValue; after: VerdictValue }[]>([])
@@ -514,7 +513,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     return () => cancelAnimationFrame(frame.id)
   }, [cursorIndex, current, view, diffStyle, cursor])
 
-  const say = (text: string) => setMessage({ text, at: Date.now() })
+  // A new object each time, so repeating a message restarts its timer.
+  const say = (text: string) => setMessage({ text })
   useEffect(() => {
     if (!message) return
     const timer = setTimeout(() => setMessage(null), 2000)

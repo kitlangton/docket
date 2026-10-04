@@ -36,7 +36,7 @@ const CONFIDENCE_LABEL: Record<Confidence, string> = { high: "High", medium: "Me
 const CONFIDENCE_BARS: Record<Confidence, number> = { high: 3, medium: 2, low: 1 }
 
 /** Three ascending bars, filled to the agent's confidence; deliberately unlike the round verdict glyphs. */
-export function ConfidenceMeter(props: { confidence: Confidence }) {
+function ConfidenceMeter(props: { confidence: Confidence }) {
   const filled = CONFIDENCE_BARS[props.confidence]
   return (
     <svg
@@ -62,7 +62,7 @@ export function ConfidenceMeter(props: { confidence: Confidence }) {
 }
 
 /** "High · S": the agent's confidence and docket's computed size, either of which may be missing. */
-export function Assessment(props: { confidence?: Confidence; load: ItemLoad | undefined; compact?: boolean }) {
+function Assessment(props: { confidence?: Confidence; load: ItemLoad | undefined }) {
   const size = props.load?.ok ? sizeOf(props.load.data.meta) : undefined
   if (!props.confidence && !size) return null
   return (
@@ -73,7 +73,6 @@ export function Assessment(props: { confidence?: Confidence; load: ItemLoad | un
       {props.confidence ? (
         <span className={`assessment-confidence is-${props.confidence}`}>
           <ConfidenceMeter confidence={props.confidence} />
-          {props.compact ? null : CONFIDENCE_LABEL[props.confidence]}
         </span>
       ) : null}
       {size ? <span className="assessment-size">{size}</span> : null}
@@ -81,11 +80,11 @@ export function Assessment(props: { confidence?: Confidence; load: ItemLoad | un
   )
 }
 
-export function Keys(props: { children: string }) {
+function Keys(props: { children: string }) {
   return (
     <span className="keys">
-      {props.children.split(" ").map((key) => (
-        <kbd key={key}>{key}</kbd>
+      {props.children.split(" ").map((key, index) => (
+        <kbd key={index}>{key}</kbd>
       ))}
     </span>
   )
@@ -253,7 +252,7 @@ export function PrHeader(props: {
           {pr.risk && !props.expanded ? <span className="pr-risk-mark">Risk</span> : null}
           {props.expanded ? null : <div className="pr-popover">{details}</div>}
         </span>
-        <Assessment confidence={pr.confidence} load={props.load} compact />
+        <Assessment confidence={pr.confidence} load={props.load} />
         {meta ? (
           <span className="pr-counts tabular">
             {meta.commits && meta.commits > 1 ? <span>{meta.commits} commits</span> : null}

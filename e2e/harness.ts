@@ -9,7 +9,7 @@ export { edit } from "./fixture"
 const ROOT = join(import.meta.dir, "..")
 const BIN = join(ROOT, "bin", "docket.ts")
 
-export async function run(cmd: string[], cwd: string, env?: Record<string, string>) {
+async function run(cmd: string[], cwd: string, env?: Record<string, string>) {
   const proc = Bun.spawn(cmd, { cwd, env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" })
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
   if (code !== 0) throw new Error(`${cmd.join(" ")} failed: ${err || out}`)
@@ -93,7 +93,7 @@ export class World {
   }
 }
 
-export class Client {
+class Client {
   output = ""
   readonly exited: Promise<number>
 

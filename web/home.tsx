@@ -3,10 +3,10 @@ import type { InboxEntry, SessionStatus } from "../src/types"
 import { feed, keyName, type Pending } from "./keymap"
 import { Glyph, Help } from "./views"
 
-const SECTIONS: { status: SessionStatus; title: string; empty: string }[] = [
-  { status: "waiting", title: "Waiting on you", empty: "" },
-  { status: "progress", title: "In progress", empty: "" },
-  { status: "done", title: "Done", empty: "" },
+const SECTIONS: { status: SessionStatus; title: string }[] = [
+  { status: "waiting", title: "Waiting on you" },
+  { status: "progress", title: "In progress" },
+  { status: "done", title: "Done" },
 ]
 
 // The last inbox seen, so coming back home renders at once while it refreshes.
@@ -104,26 +104,22 @@ export function Home(props: { tick: number; onOpen: (id: string) => void }) {
         ) : (
           SECTIONS.map((section) => {
             const list = ordered.filter((row) => row.status === section.status)
-            if (!list.length && !section.empty) return null
+            if (!list.length) return null
             return (
               <section className="inbox-section" key={section.status}>
                 <h2>
                   {section.title}
-                  <span className="tabular">{list.length || ""}</span>
+                  <span className="tabular">{list.length}</span>
                 </h2>
-                {list.length ? (
-                  list.map((row) => (
-                    <InboxRow
-                      key={row.id}
-                      row={row}
-                      selected={row.id === current?.id}
-                      onOpen={() => props.onOpen(row.id)}
-                      onArchive={() => archive(row)}
-                    />
-                  ))
-                ) : (
-                  <p className="inbox-empty-section">{section.empty}</p>
-                )}
+                {list.map((row) => (
+                  <InboxRow
+                    key={row.id}
+                    row={row}
+                    selected={row.id === current?.id}
+                    onOpen={() => props.onOpen(row.id)}
+                    onArchive={() => archive(row)}
+                  />
+                ))}
               </section>
             )
           })
