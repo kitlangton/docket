@@ -41,6 +41,10 @@
   --popover: #141416;
   --button: #18181b;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Inset for prose in the main pane; matches the file header chevron so text and diffs share an edge. */
+  --pad: 20px;
+  --band: #141416;
+  --separator: #17171a;
 
   --diffs-font-family: var(--mono);
   --diffs-font-size: 12.5px;
@@ -71,6 +75,8 @@
     --note: #f6f7fb;
     --popover: #ffffff;
     --button: #ffffff;
+    --band: #fafafb;
+    --separator: #f4f4f6;
     color-scheme: light;
   }
 
@@ -398,13 +404,13 @@ kbd {
 .main {
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 0 40px 30vh;
+  padding: 0 0 30vh;
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
 
 .pr-header {
-  padding: 34px 0 26px;
+  padding: 34px var(--pad) 26px;
 }
 
 .pr-context {
@@ -537,8 +543,9 @@ kbd {
 
 .pr-notes {
   list-style: none;
-  max-width: 740px;
+  max-width: calc(740px + var(--pad));
   margin: -10px 0 26px;
+  padding-inline: var(--pad);
   padding: 0;
   display: grid;
   gap: 2px;
@@ -595,44 +602,71 @@ kbd {
 
 .files {
   display: grid;
-  gap: 4px;
-}
-
-.file:not([data-collapsed]) {
-  margin-block: 14px;
+  border-bottom: 1px solid var(--border);
 }
 
 .file {
   min-width: 0;
+  border-top: 1px solid var(--border);
 }
 
 .fh {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 38px;
-  padding: 0 8px;
+  height: 40px;
+  padding: 0 16px 0 var(--pad);
   border-bottom: 1px solid var(--border);
+  background: var(--band);
   font: var(--fs-small) / 1 var(--sans);
   color: var(--text-2);
   cursor: pointer;
   user-select: none;
 }
 
-.fh.is-collapsed {
-  height: 34px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--raised);
+.fh:hover {
+  background: color-mix(in srgb, var(--band) 70%, var(--active));
 }
 
-.fh.is-collapsed:hover {
-  background: var(--hover);
+.fh.is-collapsed {
+  border-bottom: 0;
 }
 
 .fh.is-cursor {
   background: var(--active);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.fh-status {
+  flex: none;
+  fill: none;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fh-status .fill {
+  stroke: none;
+}
+
+.fh-status.is-modified {
+  stroke: var(--accent);
+}
+
+.fh-status.is-modified .fill {
+  fill: var(--accent);
+}
+
+.fh-status.is-added {
+  stroke: var(--approve);
+}
+
+.fh-status.is-deleted {
+  stroke: var(--reject);
+}
+
+.fh-status.is-renamed {
+  stroke: var(--skip);
 }
 
 .fh-chevron {
@@ -685,7 +719,7 @@ kbd {
 
 .error,
 .empty {
-  padding: 12px 0;
+  padding: 12px var(--pad);
   color: var(--text-2);
 }
 
@@ -776,7 +810,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 28px;
+  margin: 28px var(--pad) 0;
   padding: 10px 10px 10px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -832,6 +866,7 @@ kbd {
 }
 
 .pr-skeleton {
+  padding-inline: var(--pad);
   display: grid;
   gap: 12px;
   padding-top: 8px;
@@ -1294,6 +1329,7 @@ kbd {
 }
 
 .large-hint {
+  padding-inline: var(--pad);
   display: flex;
   align-items: center;
   gap: 6px;

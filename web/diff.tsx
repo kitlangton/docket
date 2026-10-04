@@ -33,12 +33,21 @@ export type FileBlockProps = {
 const BASE_CSS = /* css */ `
 :host { --diffs-bg: var(--bg); background-color: var(--bg); }
 [data-diffs-header] { position: sticky; top: 0; z-index: 3; min-height: 0; padding: 0; background: var(--bg); }
-[data-separator=line-info-basic] { height: 28px; background-color: transparent; }
+[data-separator=line-info-basic] { height: 30px; background-color: transparent; }
 [data-separator-wrapper], [data-separator-content] { background-color: transparent; }
-[data-separator-content] { color: var(--text-4); font: 11px/1 var(--sans); padding-left: 2ch; }
+[data-separator-content] { color: var(--text-3); font: 11.5px/1 var(--sans); padding-left: 2ch; }
+/* A low-contrast inset band per side, like diffshub's unmodified-lines rows. */
 [data-gutter] [data-separator=line-info-basic], [data-content] [data-separator=line-info-basic] {
-  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+  background-color: var(--separator);
+  box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg);
 }
+[data-deletions] [data-gutter] [data-separator=line-info-basic], [data-unified] [data-gutter] [data-separator=line-info-basic] {
+  border-radius: 0;
+  box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset 8px 0 0 var(--bg);
+}
+[data-content] [data-separator=line-info-basic] { box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset -4px 0 0 var(--bg); }
+[data-additions] [data-gutter] [data-separator=line-info-basic] { box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset 4px 0 0 var(--bg); }
+[data-additions] [data-content] [data-separator=line-info-basic] { box-shadow: inset 0 5px 0 var(--bg), inset 0 -5px 0 var(--bg), inset -8px 0 0 var(--bg); }
 [data-line], [data-no-newline] { --mix-dark: 88%; }
 [data-gutter-buffer], [data-column-number] { --mix-dark: 91%; }
 [data-content-buffer] { opacity: 0.5; }
@@ -199,6 +208,7 @@ function FileHeader(props: {
           strokeLinejoin="round"
         />
       </svg>
+      <StatusIcon type={props.file.type} />
       <span className="fh-path">
         {props.file.prevName ? <span className="fh-dir">{props.file.prevName} → </span> : null}
         <span className="fh-dir">{props.file.name.slice(0, slash + 1)}</span>
@@ -219,6 +229,20 @@ function FileHeader(props: {
         )}
       </span>
     </div>
+  )
+}
+
+/** Circled change-type glyph, after diffshub's file headers. */
+function StatusIcon(props: { type: FileDiffMetadata["type"] }) {
+  const kind = props.type === "new" ? "added" : props.type === "deleted" ? "deleted" : props.type === "change" ? "modified" : "renamed"
+  return (
+    <svg className={`fh-status is-${kind}`} width="14" height="14" viewBox="0 0 14 14" aria-label={kind}>
+      <rect x="1" y="1" width="12" height="12" rx="3.5" />
+      {kind === "modified" ? <circle cx="7" cy="7" r="2" className="fill" /> : null}
+      {kind === "added" ? <path d="M7 4.3v5.4M4.3 7h5.4" /> : null}
+      {kind === "deleted" ? <path d="M4.3 7h5.4" /> : null}
+      {kind === "renamed" ? <path d="M4.3 7h5M7.5 4.8L9.7 7 7.5 9.2" /> : null}
+    </svg>
   )
 }
 
