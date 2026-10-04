@@ -88,6 +88,7 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `e` / `Enter` | Edit the focused PR note _(note)_ |
 | `d` | Delete the focused PR note _(note)_ |
 | `x` | Mark file viewed |
+| `i` | Toggle changes since your review |
 | **Folds** | |
 | `za` / `o` | Toggle fold |
 | `zo` | Open fold |

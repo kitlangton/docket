@@ -2043,3 +2043,41 @@ kbd {
   color: var(--text);
   cursor: pointer;
 }
+
+/* Re-review */
+
+.note.is-outdated {
+  cursor: default;
+  border-left-color: var(--border-strong);
+  opacity: 0.8;
+}
+
+.note.is-outdated .note-range {
+  color: var(--text-3);
+}
+
+.glyph.is-stale {
+  opacity: 0.4;
+}
+
+.verdict-chip.is-stale {
+  opacity: 0.55;
+}
+
+.updated-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.pr-updated {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--fs-small);
+}
+
+.orphan-notes {
+  padding: 8px 0;
+}

@@ -81,6 +81,9 @@ export type Note = {
   side?: Side
   startLine?: number
   line?: number
+  /** Head commit the note was written against, and the text of its line then, to tell when it is outdated. */
+  head?: string
+  text?: string
 }
 
 export type PrReview = {
@@ -88,6 +91,8 @@ export type PrReview = {
   reason?: string
   notes: Note[]
   viewed?: string[]
+  /** Head commit at the verdict, or at the last note when there is no verdict. */
+  reviewedHead?: string
 }
 
 export type ReviewState = {
@@ -123,6 +128,8 @@ export type VerdictsFile = {
     verdict: Verdict | null
     reason?: string
     notes: VerdictNote[]
+    reviewedHead?: string
+    currentHead?: string
   }[]
 }
 

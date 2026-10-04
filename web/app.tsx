@@ -195,16 +195,31 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const redoRef = useRef<typeof undoRef.current>([])
   const pointer = useRef({ x: 0, y: 0 })
 
+  // "Since your review" diffs, fetched per PR when `i` is first pressed.
+  const [interdiffs, setInterdiffs] = useState<Record<string, { from: string; head: string; patch: string; on: boolean }>>({})
+  const headOf = (id: string) => (session.items[id]?.ok ? session.items[id].data.meta.headRefOid : undefined)
+  const isUpdated = (id: string) => {
+    const reviewed = state.reviews[id]?.reviewedHead
+    const head = headOf(id)
+    return Boolean(reviewed && head && reviewed !== head)
+  }
+
   const models = useMemo(() => {
     const result = new Map<string, PrModel>()
     entries.forEach((entry) => {
       const load = session.items[entry.id]
       if (!load?.ok) return
+      const head = load.data.meta.headRefOid
+      const since = interdiffs[entry.id]
+      if (since?.on && since.head === head)
+        return result.set(entry.id, buildModel(since.patch, `${entry.id}-${since.from}-${head}`, entry.pr.focus))
       const patch = ignoreWhitespace ? load.data.patchIgnoreWhitespace : load.data.patch
-      result.set(entry.id, buildModel(patch, `${entry.id}-${load.data.meta.headRefOid}-${ignoreWhitespace ? "w" : ""}`, entry.pr.focus))
+      result.set(entry.id, buildModel(patch, `${entry.id}-${head}-${ignoreWhitespace ? "w" : ""}`, entry.pr.focus))
     })
     return result
-  }, [entries, session.items, ignoreWhitespace])
+  }, [entries, session.items, ignoreWhitespace, interdiffs])
+  const updatedIds = new Set(order.filter(isUpdated))
+  const sinceReview = Boolean(interdiffs[current]?.on && interdiffs[current]?.head === headOf(current))
 
   const entry = entries[order.indexOf(current)]!
   const model = models.get(current)
@@ -256,11 +271,17 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   }, [save, props.flush])
 
   useEffect(() => {
+    // Local refs have no push events to poll; check them whenever the tab comes back into focus.
+    const refresh = () => fetch(`${props.base}/refresh`, { method: "POST" })
+    window.addEventListener("focus", refresh)
     const track = (event: PointerEvent) => {
       pointer.current = { x: event.clientX, y: event.clientY }
     }
     window.addEventListener("pointerup", track, true)
-    return () => window.removeEventListener("pointerup", track, true)
+    return () => {
+      window.removeEventListener("pointerup", track, true)
+      window.removeEventListener("focus", refresh)
+    }
   }, [])
 
   const updateReview = useCallback((id: string, fn: (review: PrReview) => PrReview) => {
@@ -296,7 +317,12 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     })
     redoRef.current = []
     const next = nextUnreviewed(order, { ...state, reviews: { ...state.reviews, [current]: { ...EMPTY_REVIEW, verdict } } }, current)
-    updateReview(current, (prev) => ({ ...prev, verdict, reason: verdict === "reject" ? reason || undefined : undefined }))
+    updateReview(current, (prev) => ({
+      ...prev,
+      verdict,
+      reason: verdict === "reject" ? reason || undefined : undefined,
+      reviewedHead: headOf(current) ?? prev.reviewedHead,
+    }))
     setStamped(current)
     setTimeout(() => setStamped((value) => (value === current ? null : value)), 400)
     if (next === undefined) {
@@ -348,20 +374,29 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
           ...(draft.startLine ? { startLine: draft.startLine } : {}),
           line: draft.line,
           body: trimmed,
+          head: headOf(current),
+          text: draftLineText(draft),
         }
         const notes = draft.noteId ? prev.notes.map((item) => (item.id === draft.noteId ? note : item)) : [...prev.notes, note]
-        return { ...prev, notes }
+        return { ...prev, notes, reviewedHead: prev.verdict ? prev.reviewedHead : (headOf(current) ?? prev.reviewedHead) }
       })
       setDraft(null)
     },
-    [draft, current, updateReview],
+    [draft, current, updateReview, session.items, model],
   )
+
+  /** The text of a draft's anchor line, from the diff model. */
+  function draftLineText(target: Draft) {
+    const fileIndex = model?.files.findIndex((file) => file.name === target.path) ?? -1
+    return model?.rows.find((row) => row.file === fileIndex && row.side === target.side && row.line === target.line)?.text
+  }
 
   const savePrNote = (noteId: string | undefined, body: string) => {
     updateReview(current, (prev) => {
       if (!body) return { ...prev, notes: prev.notes.filter((note) => note.id !== noteId) }
       if (noteId) return { ...prev, notes: prev.notes.map((note) => (note.id === noteId ? { ...note, body } : note)) }
-      return { ...prev, notes: [...prev.notes, { id: crypto.randomUUID(), body }] }
+      const reviewedHead = prev.verdict ? prev.reviewedHead : (headOf(current) ?? prev.reviewedHead)
+      return { ...prev, notes: [...prev.notes, { id: crypto.randomUUID(), body, head: headOf(current) }], reviewedHead }
     })
   }
 
@@ -648,7 +683,25 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     setFolds((prev) => ({ ...prev, ...Object.fromEntries(model.files.map((file) => [`${current}:${file.name}`, folded])) }))
   }
 
+  const toggleInterdiff = async () => {
+    const from = state.reviews[current]?.reviewedHead
+    const head = headOf(current)
+    if (!from || !head || from === head) return say("No changes since your review")
+    const known = interdiffs[current]
+    scrollIntent.current = "top"
+    setCursors((prev) => ({ ...prev, [current]: HEADER }))
+    if (known && known.from === from && known.head === head)
+      return setInterdiffs((prev) => ({ ...prev, [current]: { ...known, on: !known.on } }))
+    const id = current
+    const res = await fetch(`${props.base}/interdiff?item=${encodeURIComponent(id)}&from=${from}`)
+    if (!res.ok) return say("Couldn't load changes since your review")
+    const body: { patch: string; status?: string } = await res.json()
+    if (body.status) say(body.status)
+    setInterdiffs((prev) => ({ ...prev, [id]: { from, head, patch: body.patch, on: true } }))
+  }
+
   const expandCursor = (all: boolean) => {
+    if (sinceReview) return say("Context can't expand in the since-review diff")
     if (!cursor || !model) return say("Move to a change first")
     const file = model.files[cursor.file]!
     if (isCollapsed(cursor.file)) setFold(cursor.file, false)
@@ -796,6 +849,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     },
     foldOpenAll: () => setAllFolds(false),
     expandContext: () => expandCursor(false),
+    interdiffToggle: () => void toggleInterdiff(),
     expandContextAll: () => expandCursor(true),
     foldCloseAll: () => setAllFolds(true),
     palette: () => setPalette(true),
@@ -897,13 +951,29 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const runLatest = useRef(run)
   runLatest.current = run
 
+  // A line note whose line is no longer in the diff at a newer head is outdated: it shows under its file header.
   const notesByFile = useMemo(() => {
-    const map = new Map<string, Note[]>()
+    const map = new Map<string, { live: Note[]; outdated: Note[] }>()
+    const head = headOf(current)
     review?.notes.forEach((note) => {
-      if (note.path) map.set(note.path, [...(map.get(note.path) ?? []), note])
+      if (!note.path) return
+      const fileIndex = model?.files.findIndex((file) => file.name === note.path) ?? -1
+      const row = model?.rows.find((item) => item.file === fileIndex && item.side === note.side && item.line === note.line)
+      const changed = !row || (note.text !== undefined && row.text !== note.text)
+      const outdated = !sinceReview && changed && Boolean(note.head && note.head !== head)
+      const bucket = map.get(note.path) ?? { live: [], outdated: [] }
+      ;(outdated ? bucket.outdated : bucket.live).push(note)
+      map.set(note.path, bucket)
     })
     return map
-  }, [review?.notes])
+  }, [review?.notes, model, sinceReview, session.items, current])
+
+  // Notes on files the PR no longer touches.
+  const orphanNotes = model
+    ? [...notesByFile]
+        .filter(([path]) => !model.files.some((file) => file.name === path))
+        .flatMap(([, bucket]) => [...bucket.live, ...bucket.outdated])
+    : []
 
   const selectionFor = (fileIndex: number) => {
     if (!cursor || cursor.file !== fileIndex || !model) return null
@@ -933,6 +1003,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
         state={state}
         current={current}
         stamped={stamped}
+        updated={updatedIds}
         onHome={props.onHome}
         onSelect={(id) => {
           setView("deck")
@@ -962,6 +1033,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
               review={review}
               state={state}
               expanded={cursorIndex === HEADER}
+              updated={isUpdated(current)}
               viewed={
                 model && viewed.size
                   ? { done: model.files.filter((file) => viewed.has(file.name)).length, total: model.files.length }
@@ -974,6 +1046,18 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
               onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
               onDelete={deleteNote}
             />
+            {orphanNotes.length ? (
+              <div className="outdated orphan-notes">
+                {orphanNotes.map((note) => (
+                  <div key={note.id} className="note is-outdated">
+                    <span className="note-range">
+                      Outdated · {note.path?.split("/").at(-1)}:{note.line}
+                    </span>
+                    <span className="note-body">{note.body}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {load && !load.ok ? (
               <div className="error">
                 Could not load {current}: {load.error}
@@ -997,13 +1081,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
                   collapsed={isCollapsed(index)}
                   viewed={viewed.has(file.name)}
                   cursorHere={cursor?.file === index}
-                  notes={notesByFile.get(file.name) ?? NO_NOTES}
+                  notes={notesByFile.get(file.name)?.live ?? NO_NOTES}
+                  outdated={notesByFile.get(file.name)?.outdated ?? NO_NOTES}
                   draft={draft && draft.path === file.name ? draft : null}
                   selection={selectionFor(index)}
                   visual={Boolean(visual) && cursor?.file === index}
                   diffStyle={diffStyle}
-                  expandKey={fileKey(session.id, current, file.name, ignoreWhitespace)}
-                  loadFiles={loadFiles}
+                  expandKey={fileKey(session.id, current, file.name, ignoreWhitespace) + (sinceReview ? ":since" : "")}
+                  loadFiles={sinceReview ? undefined : loadFiles}
                   onLine={clickLine}
                   onRange={pickRange}
                   onSaveDraft={saveDraft}
@@ -1060,7 +1145,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
           state={state}
           position={view === "deck" ? statusPosition : ""}
           pending={pending}
-          mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
+          mode={[sinceReview ? "since review" : "", diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""]
+            .filter(Boolean)
+            .join(" · ")}
           message={message?.text ?? ""}
         />
       )}

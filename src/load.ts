@@ -249,3 +249,21 @@ export async function baseFor(manifest: Manifest, meta: ItemMeta) {
   const base = meta.state === "LOCAL" ? meta.baseRefName : `origin/${meta.baseRefName}`
   return mergeBase(manifest, base, meta.headRefOid).catch(() => undefined)
 }
+
+/**
+ * What changed in a PR since `from`, its head at the last review: the trees of the two heads compared on the
+ * files the PR touches, which also works across force-pushes. When `from` is no longer available, returns the
+ * full diff with a status.
+ */
+export async function interdiff(manifest: Manifest, data: ItemData, from: string) {
+  const files = [...new Set([...data.patch.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)].flatMap((match) => [match[1]!, match[2]!]))]
+  const available =
+    (await hasCommit(manifest, from)) ||
+    (await run([...git(manifest), "fetch", "--quiet", "origin", from])
+      .then(() => hasCommit(manifest, from))
+      .catch(() => false))
+  if (!available) return { patch: data.patch, status: "The reviewed commit is gone; showing the full diff" }
+  if (!files.length) return { patch: "" }
+  const patch = await run([...git(manifest), "diff", "--no-color", "--no-ext-diff", "-M", from, data.meta.headRefOid, "--", ...files])
+  return { patch }
+}

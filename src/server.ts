@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises"
 import { basename, join } from "node:path"
 import index from "../web/index.html"
-import { baseFor, fileAt, loadAll, manifestItems, readCache } from "./load"
+import { baseFor, fileAt, interdiff, loadAll, manifestItems, readCache } from "./load"
 import { dataHome, type Session } from "./session"
 import {
   sizeOf,
@@ -19,6 +19,7 @@ import {
 } from "./types"
 
 export const APP_ID = "docket"
+const REFRESH_MS = Number(process.env.DOCKET_REFRESH_MS ?? 60_000)
 
 export type ServerOptions = {
   port: number
@@ -43,7 +44,13 @@ type Entry = {
   archived?: boolean
 }
 
-type Runtime = { items: Record<string, ItemLoad>; progress: Progress; version: number }
+type Runtime = {
+  items: Record<string, ItemLoad>
+  progress: Progress
+  version: number
+  /** Reloads every item, or only local refs, picking up new commits. */
+  refresh: (only?: "local") => void
+}
 
 type Stream = { send: (data: unknown) => void; close: () => void }
 
@@ -251,6 +258,24 @@ export async function serve(options: ServerOptions) {
           })
         },
       },
+      "/api/s/:id/refresh": {
+        POST: (req) => {
+          const found = session(req)
+          if (!found) return notFound()
+          runtime(found.id)?.refresh("local")
+          return Response.json({ ok: true })
+        },
+      },
+      "/api/s/:id/interdiff": {
+        GET: async (req) => {
+          const found = session(req)
+          if (!found) return notFound()
+          const params = new URL(req.url).searchParams
+          const load = runtime(found.id)?.items[params.get("item") ?? ""]
+          if (!load?.ok) return notFound()
+          return Response.json(await interdiff(found.entry.session.manifest, load.data, params.get("from") ?? ""))
+        },
+      },
       "/api/s/:id/handback": {
         POST: async (req) => {
           const found = session(req)
@@ -303,6 +328,11 @@ export async function serve(options: ServerOptions) {
     },
     Math.min(30_000, Math.max(250, options.idleMs / 4)),
   )
+  // Pick up new commits on sessions someone is looking at; local refs also refresh when their tab gains focus.
+  setInterval(() => {
+    const open = new Set([...tabs.values()].flatMap((tab) => tab.at.match(/^\/s\/([^/]+)/)?.slice(1) ?? []).map(decodeURIComponent))
+    open.forEach((id) => runtimes.get(id)?.refresh())
+  }, REFRESH_MS)
   process.on("SIGTERM", shutdown)
   process.on("SIGINT", shutdown)
   return { server, url: publicUrl }
@@ -311,8 +341,33 @@ export async function serve(options: ServerOptions) {
 function startRuntime(session: Session, refresh: boolean, changed: (version: number) => void): Runtime {
   const manifest = session.manifest
   const ids = manifestItems(manifest).map(itemId)
-  const runtime: Runtime = { items: {}, progress: { done: 0, total: ids.length, phase: "Starting" }, version: 0 }
   const bump = () => changed(++runtime.version)
+  const accept = (load: ItemLoad) => {
+    const id = load.ok ? load.data.meta.id : load.id
+    const previous = runtime.items[id]
+    // Keep a good copy rather than replacing it with a refresh failure.
+    if (!load.ok && previous?.ok) return false
+    if (load.ok && previous?.ok && JSON.stringify(load.data) === JSON.stringify(previous.data)) return false
+    runtime.items[id] = load
+    return true
+  }
+  const reloading = { busy: false }
+  const reload = (only?: "local") => {
+    if (reloading.busy) return Promise.resolve()
+    reloading.busy = true
+    const groups = only ? [{ title: "local", prs: manifestItems(manifest).filter((item) => item.number === undefined) }] : manifest.groups
+    return loadAll({ ...manifest, groups }, { phase: () => {}, loaded: (load) => accept(load) && bump() })
+      .catch((error) => console.error(`docket: refresh failed: ${error}`))
+      .finally(() => {
+        reloading.busy = false
+      })
+  }
+  const runtime: Runtime = {
+    items: {},
+    progress: { done: 0, total: ids.length, phase: "Starting" },
+    version: 0,
+    refresh: (only) => void reload(only),
+  }
   const cached = (refresh ? Promise.resolve([]) : readCache(manifest)).then((list) => {
     list.forEach((data) => {
       runtime.items[data.meta.id] = { ok: true, data }
@@ -323,18 +378,14 @@ function startRuntime(session: Session, refresh: boolean, changed: (version: num
     bump()
     return complete
   })
-  cached.then((complete) =>
+  cached.then((complete) => {
+    reloading.busy = true
     loadAll(manifest, {
       phase: (phase) => {
         if (!complete) runtime.progress.phase = phase
       },
       loaded: (load) => {
-        const id = load.ok ? load.data.meta.id : load.id
-        const previous = runtime.items[id]
-        // Keep a good cached copy rather than replacing it with a refresh failure.
-        if (!load.ok && previous?.ok) return
-        if (load.ok && previous?.ok && JSON.stringify(load.data) === JSON.stringify(previous.data)) return
-        runtime.items[id] = load
+        if (!accept(load)) return
         if (!complete) runtime.progress.done = Object.keys(runtime.items).length
         bump()
       },
@@ -347,8 +398,11 @@ function startRuntime(session: Session, refresh: boolean, changed: (version: num
         if (complete) return console.error(`docket: background refresh failed: ${error}`)
         runtime.progress.phase = `Failed: ${error}`
         bump()
-      }),
-  )
+      })
+      .finally(() => {
+        reloading.busy = false
+      })
+  })
   return runtime
 }
 
@@ -443,7 +497,10 @@ async function readState(path: string): Promise<ReviewState> {
   const reviews = Object.fromEntries(
     Object.entries(raw.reviews ?? {}).map(([id, review]): [string, PrReview] => {
       const notes: Note[] = [...(review.prNote ? [{ id: crypto.randomUUID(), body: review.prNote }] : []), ...(review.notes ?? [])]
-      return [id, { verdict: review.verdict ?? null, reason: review.reason, notes, viewed: review.viewed }]
+      return [
+        id,
+        { verdict: review.verdict ?? null, reason: review.reason, notes, viewed: review.viewed, reviewedHead: review.reviewedHead },
+      ]
     }),
   )
   return { version: 2, current: raw.current === null || raw.current === undefined ? null : String(raw.current), reviews }
@@ -464,6 +521,8 @@ export function toVerdicts(sessionPath: string, manifest: Manifest, items: Recor
         ...(load?.ok ? { size: sizeOf(load.data.meta) } : {}),
         verdict: review?.verdict ?? null,
         ...(review?.reason ? { reason: review.reason } : {}),
+        ...(review?.reviewedHead ? { reviewedHead: review.reviewedHead } : {}),
+        ...(load?.ok ? { currentHead: load.data.meta.headRefOid } : {}),
         notes: (review?.notes ?? []).map((note) => {
           if (!note.path || note.line === undefined) return { body: note.body }
           return {

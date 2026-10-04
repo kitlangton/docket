@@ -11,7 +11,15 @@ import {
 } from "../src/types"
 
 /** `hunk` is the row's hunk index within its file, which names the context gaps around it. */
-export type Row = { file: number; hunk: number; side: Side; line: number; kind: "context" | "add" | "del"; block: number | null }
+export type Row = {
+  file: number
+  hunk: number
+  side: Side
+  line: number
+  kind: "context" | "add" | "del"
+  block: number | null
+  text: string
+}
 export type Block = { file: number; first: number; last: number; range: SelectedLineRange }
 export type PrModel = { files: FileDiffMetadata[]; focus: Set<string>; rows: Row[]; blocks: Block[]; large: boolean }
 
@@ -39,8 +47,9 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
       const pos = { old: hunk.deletionStart, new: hunk.additionStart }
       hunk.hunkContent.forEach((content, contentIndex) => {
         if (content.type === "context") {
-          range(content.lines).forEach(() => {
-            rows.push({ file: fileIndex, hunk: hunkIndex, side: "additions", line: pos.new, kind: "context", block: null })
+          range(content.lines).forEach((offset) => {
+            const text = file.additionLines[content.additionLineIndex + offset] ?? ""
+            rows.push({ file: fileIndex, hunk: hunkIndex, side: "additions", line: pos.new, kind: "context", block: null, text })
             pos.old++
             pos.new++
           })
@@ -50,8 +59,14 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
         const continues = hunk.hunkContent[contentIndex - 1]?.type === "change"
         const block = continues ? blocks.length - 1 : blocks.length
         const first = continues ? blocks[block]!.first : rows.length
-        range(content.deletions).forEach(() => rows.push({ file: fileIndex, hunk: hunkIndex, side: "deletions", line: pos.old++, kind: "del", block }))
-        range(content.additions).forEach(() => rows.push({ file: fileIndex, hunk: hunkIndex, side: "additions", line: pos.new++, kind: "add", block }))
+        range(content.deletions).forEach((offset) => {
+          const text = file.deletionLines[content.deletionLineIndex + offset] ?? ""
+          rows.push({ file: fileIndex, hunk: hunkIndex, side: "deletions", line: pos.old++, kind: "del", block, text })
+        })
+        range(content.additions).forEach((offset) => {
+          const text = file.additionLines[content.additionLineIndex + offset] ?? ""
+          rows.push({ file: fileIndex, hunk: hunkIndex, side: "additions", line: pos.new++, kind: "add", block, text })
+        })
         const start = rows[first]!
         const end = rows[rows.length - 1]!
         blocks[block] = {

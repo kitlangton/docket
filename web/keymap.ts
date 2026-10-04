@@ -52,6 +52,7 @@ export type Action =
   | "foldCloseAll"
   | "expandContext"
   | "expandContextAll"
+  | "interdiffToggle"
   | "palette"
   | "splitToggle"
   | "whitespaceToggle"
@@ -87,7 +88,13 @@ export type Binding = {
 
 export const KEYMAP: Binding[] = [
   { keys: ["j", "] c", "}"], action: "changeNext", label: "Next change", group: "Navigate", count: true },
-  { keys: ["k", "[ c", "{"], action: "changePrev", label: "Previous change; from the first, the PR header", group: "Navigate", count: true },
+  {
+    keys: ["k", "[ c", "{"],
+    action: "changePrev",
+    label: "Previous change; from the first, the PR header",
+    group: "Navigate",
+    count: true,
+  },
   { keys: ["C-n"], action: "lineNext", label: "Next line", group: "Navigate", count: true },
   { keys: ["C-p"], action: "linePrev", label: "Previous line", group: "Navigate", count: true },
   { keys: ["]"], action: "fileNext", label: "Next file", group: "Navigate", count: true },
@@ -125,6 +132,7 @@ export const KEYMAP: Binding[] = [
   { keys: ["e", "Enter"], action: "noteEdit", label: "Edit the focused PR note", group: "Review", modes: ["note"] },
   { keys: ["d"], action: "noteDelete", label: "Delete the focused PR note", group: "Review", modes: ["note"] },
   { keys: ["x"], action: "viewed", label: "Mark file viewed", group: "Review" },
+  { keys: ["i"], action: "interdiffToggle", label: "Toggle changes since your review", group: "Review" },
 
   { keys: ["z a", "o"], action: "foldToggle", label: "Toggle fold", group: "Folds" },
   { keys: ["z o"], action: "foldOpen", label: "Open fold", group: "Folds" },
@@ -134,7 +142,13 @@ export const KEYMAP: Binding[] = [
   { keys: ["e"], action: "expandContext", label: "Expand 20 lines of context around the change", group: "Folds" },
   { keys: ["E"], action: "expandContextAll", label: "Expand all context around the change", group: "Folds" },
 
-  { keys: [":"], action: "commandLine", label: "Command line (:w :q :wq :s :<PR number>)", group: "Commands", modes: ["normal", "summary"] },
+  {
+    keys: [":"],
+    action: "commandLine",
+    label: "Command line (:w :q :wq :s :<PR number>)",
+    group: "Commands",
+    modes: ["normal", "summary"],
+  },
   { keys: ["Enter"], action: "summary", label: "Summary (unfolds a folded file first)", group: "Commands" },
   { keys: ["Z Z"], action: "handBackClose", label: "Hand back and close", group: "Commands", modes: ["normal", "summary"] },
   { keys: ["f"], action: "palette", label: "Jump to file", group: "Commands" },

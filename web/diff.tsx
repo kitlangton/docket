@@ -7,7 +7,7 @@ import { SEPARATOR_CSS, stampSeparators } from "./separators"
 
 export type Draft = { path: string; side: Side; startLine?: number; line: number; body: string; noteId?: string }
 
-type AnnotationMeta = { kind: "note"; note: Note } | { kind: "draft"; draft: Draft }
+type AnnotationMeta = { kind: "note"; note: Note } | { kind: "draft"; draft: Draft } | { kind: "outdated"; notes: Note[] }
 
 export type FileBlockProps = {
   index: number
@@ -17,6 +17,8 @@ export type FileBlockProps = {
   viewed: boolean
   cursorHere: boolean
   notes: Note[]
+  /** Notes whose line is gone at the current head, shown under the file header. */
+  outdated: Note[]
   draft: Draft | null
   selection: SelectedLineRange | null
   /** Visual mode: show the selection as a range instead of the cursor. */
@@ -24,7 +26,7 @@ export type FileBlockProps = {
   diffStyle: "split" | "unified"
   /** Where this file's context expansions are recorded. */
   expandKey: string
-  loadFiles: NonNullable<FileDiffOptions<AnnotationMeta, undefined>["loadDiffFiles"]>
+  loadFiles: FileDiffOptions<AnnotationMeta, undefined>["loadDiffFiles"]
   onLine: (file: number, side: Side, line: number) => void
   /** A range picked with the mouse; `compose` is true when it came from the gutter + button. */
   onRange: (file: number, range: SelectedLineRange, compose: boolean) => void
@@ -117,16 +119,32 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
         ? []
         : [{ side: note.side, lineNumber: note.line, metadata: { kind: "note" as const, note } }],
     )
-    if (!props.draft) return notes
+    const outdated: DiffLineAnnotation<AnnotationMeta>[] = props.outdated.length
+      ? [{ side: "additions", lineNumber: 0, metadata: { kind: "outdated", notes: props.outdated } }]
+      : []
+    if (!props.draft) return [...outdated, ...notes]
     const draft = props.draft
-    return [...notes, { side: draft.side, lineNumber: draft.line, metadata: { kind: "draft" as const, draft } }]
-  }, [props.notes, props.draft])
+    return [...outdated, ...notes, { side: draft.side, lineNumber: draft.line, metadata: { kind: "draft" as const, draft } }]
+  }, [props.notes, props.outdated, props.draft])
 
   const { onSaveDraft, onCancelDraft, onEditNote } = props
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<AnnotationMeta>) => {
       const meta = annotation.metadata
       if (meta.kind === "draft") return <DraftEditor draft={meta.draft} onSave={onSaveDraft} onCancel={onCancelDraft} />
+      if (meta.kind === "outdated")
+        return (
+          <div className="outdated">
+            {meta.notes.map((note) => (
+              <div key={note.id} className="note is-outdated">
+                <span className="note-range">
+                  Outdated · {note.startLine ? `Lines ${note.startLine}–${note.line}` : `Line ${note.line}`}
+                </span>
+                <span className="note-body">{note.body}</span>
+              </div>
+            ))}
+          </div>
+        )
       return (
         <div className="note" onClick={() => onEditNote(meta.note)}>
           {meta.note.startLine ? (
@@ -149,7 +167,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
         collapsed={props.collapsed}
         viewed={props.viewed}
         cursorHere={props.cursorHere}
-        notes={props.notes.length}
+        notes={props.notes.length + props.outdated.length}
         onToggle={onToggle}
       />
     ),
