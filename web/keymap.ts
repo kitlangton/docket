@@ -54,6 +54,8 @@ export type Action =
   | "expandContextAll"
   | "interdiffToggle"
   | "treeToggle"
+  | "unviewedNext"
+  | "unviewedPrev"
   | "treeNext"
   | "treePrev"
   | "treeOpen"
@@ -105,6 +107,8 @@ export const KEYMAP: Binding[] = [
   { keys: ["C-p"], action: "linePrev", label: "Previous line", group: "Navigate", count: true },
   { keys: ["]"], action: "fileNext", label: "Next file", group: "Navigate", count: true },
   { keys: ["["], action: "filePrev", label: "Previous file", group: "Navigate", count: true },
+  { keys: ["] u"], action: "unviewedNext", label: "Next unviewed file; at the end, the next unreviewed PR", group: "Navigate" },
+  { keys: ["[ u"], action: "unviewedPrev", label: "Previous unviewed file", group: "Navigate" },
   { keys: ["J"], action: "prNext", label: "Next PR", group: "Navigate", count: true },
   { keys: ["K"], action: "prPrev", label: "Previous PR", group: "Navigate", count: true },
   { keys: ["g g"], action: "top", label: "Top of PR", group: "Navigate" },

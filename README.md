@@ -58,6 +58,8 @@ The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which 
 | `Ctrl-p` | Previous line (count) |
 | `]` | Next file (count) |
 | `[` | Previous file (count) |
+| `]u` | Next unviewed file; at the end, the next unreviewed PR |
+| `[u` | Previous unviewed file |
 | `J` | Next PR (count) |
 | `K` | Previous PR (count) |
 | `gg` | Top of PR |

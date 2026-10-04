@@ -765,6 +765,21 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     }
   }, [treeOn, current, view, model])
 
+  const stepUnviewed = (direction: 1 | -1) => {
+    const files = model?.files ?? []
+    const from = cursor?.file ?? (direction === 1 ? -1 : files.length)
+    const candidates = files.map((file, index) => ({ file, index })).filter(({ file }) => !viewed.has(file.name))
+    const target = direction === 1 ? candidates.find(({ index }) => index > from) : candidates.findLast(({ index }) => index < from)
+    if (target) {
+      if (isCollapsed(target.index)) setFold(target.index, false)
+      return jumpToFile(target.index)
+    }
+    if (direction === -1) return say("No unviewed file above")
+    const next = nextUnreviewed(order, state, current)
+    if (next) return switchPr(next)
+    say("Everything is viewed and reviewed")
+  }
+
   const fileStep = (direction: 1 | -1, count: number) => {
     const rows = model?.rows ?? []
     const file = cursor?.file ?? HEADER
@@ -918,6 +933,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       if (next) focusTree()
       else setTreeFocus(false)
     },
+    unviewedNext: () => stepUnviewed(1),
+    unviewedPrev: () => stepUnviewed(-1),
     treeNext: () => stepTree(1),
     treePrev: () => stepTree(-1),
     treeOpen: () => {
