@@ -226,13 +226,6 @@ export async function fileAt(manifest: Manifest, oid: string, path: string) {
   ]).catch(() => undefined)
 }
 
-/** The merge base for an item loaded before `baseOid` was recorded. */
-export async function baseFor(manifest: Manifest, meta: ItemMeta) {
-  if (meta.baseOid) return meta.baseOid
-  const base = meta.state === "LOCAL" ? meta.baseRefName : `origin/${meta.baseRefName}`
-  return mergeBase(manifest, base, meta.headRefOid).catch(() => undefined)
-}
-
 /**
  * What changed in a PR since `from`, its head at the last review: the trees of the two heads compared on the
  * files the PR touches, which also works across force-pushes. When `from` is no longer available, returns the

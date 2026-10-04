@@ -715,10 +715,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   const expandCursor = (all: boolean) => {
     if (sinceReview) return say("Context can't expand in the since-review diff")
+    if (!loadFiles || !meta) return say("Context isn't available for this PR")
     if (!cursor || !model) return say("Move to a change first")
     const file = model.files[cursor.file]!
     if (isCollapsed(cursor.file)) setFold(cursor.file, false)
-    expandAround(fileKey(session.id, current, file.name, ignoreWhitespace), cursor.hunk, all)
+    expandAround(fileKey(session.id, current, meta.headRefOid, file.name, ignoreWhitespace), cursor.hunk, all)
   }
 
   // --- File tree.
@@ -1088,7 +1089,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   }
 
   const load = session.items[current]
-  const loadFiles = useMemo(() => loader(props.base, current), [props.base, current])
+  const meta = load?.ok ? load.data.meta : undefined
+  const loadFiles = useMemo(
+    () => (meta ? loader(props.base, meta.baseOid, meta.headRefOid) : undefined),
+    [props.base, meta?.baseOid, meta?.headRefOid],
+  )
   const visualAnchor = visual && model ? rangeAnchor(model.rows, visual.anchor, cursorIndex) : undefined
   const visualCount = visualAnchor ? visualAnchor.line - (visualAnchor.startLine ?? visualAnchor.line) + 1 : 0
   const statusPosition = visual
@@ -1192,7 +1197,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
                   visual={Boolean(visual) && cursor?.file === index}
                   diffStyle={diffStyle}
                   wrap={wrap}
-                  expandKey={fileKey(session.id, current, file.name, ignoreWhitespace) + (sinceReview ? ":since" : "")}
+                  expandKey={
+                    fileKey(session.id, current, meta?.headRefOid ?? "", file.name, ignoreWhitespace) + (sinceReview ? ":since" : "")
+                  }
                   loadFiles={sinceReview ? undefined : loadFiles}
                   onLine={clickLine}
                   onRange={pickRange}

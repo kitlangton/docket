@@ -1,7 +1,7 @@
 import { mkdir, rename } from "node:fs/promises"
 import { basename, join } from "node:path"
 import index from "../web/index.html"
-import { baseFor, fileAt, interdiff, loadAll, manifestItems, readCache } from "./load"
+import { fileAt, interdiff, loadAll, manifestItems, readCache } from "./load"
 import { writeAtomic } from "./files"
 import { dataHome } from "./session"
 import { readState, toVerdicts } from "./state"
@@ -230,16 +230,15 @@ export async function serve(options: ServerOptions) {
           })
         },
       },
+      // Content-addressed: the same commit and path always give the same file, so it can be cached forever.
       "/api/s/:id/file": {
         GET: async (req) => {
           const found = session(req)
           if (!found) return notFound()
           const params = new URL(req.url).searchParams
-          const load = runtime(found.id)?.items[params.get("item") ?? ""]
-          if (!load?.ok) return notFound()
-          const manifest = found.entry.session.manifest
-          const oid = params.get("side") === "old" ? await baseFor(manifest, load.data.meta) : load.data.meta.headRefOid
-          const contents = oid ? await fileAt(manifest, oid, params.get("path") ?? "") : undefined
+          const oid = params.get("oid") ?? ""
+          if (!/^[0-9a-f]{40,64}$/.test(oid)) return new Response("Bad commit", { status: 400 })
+          const contents = await fileAt(found.entry.session.manifest, oid, params.get("path") ?? "")
           if (contents === undefined) return new Response("Not found", { status: 404 })
           return new Response(contents, {
             headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "max-age=31536000, immutable" },

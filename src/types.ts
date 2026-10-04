@@ -47,7 +47,7 @@ export type ItemMeta = {
   titleIsRef?: boolean
   body: string
   headRefOid: string
-  /** The merge base the diff was taken from. */
+  /** The merge base the diff was taken from. Unknown for diffs from `gh pr diff`, which then can't expand context. */
   baseOid?: string
   baseRefName: string
   url?: string

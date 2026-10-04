@@ -119,7 +119,8 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
         diffNode.current = node
         stampSeparators(node, props.file)
         stampNoteRanges(node, noteRangesRef.current)
-        if (phase !== "mount") return
+        // Without a loader (diffs from `gh pr diff`, the since-review diff) context can't expand.
+        if (phase !== "mount" || !props.loadFiles) return
         node.shadowRoot?.addEventListener(
           "click",
           onSeparatorClick(props.expandKey, () => props.file.hunks.length),
