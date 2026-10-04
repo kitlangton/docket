@@ -44,8 +44,6 @@
   /* Inset for prose in the main pane; matches the file header chevron so text and diffs share an edge. */
   --pad: 20px;
   --band: #141416;
-  --sep: #232327;
-  --sep-strong: #34343a;
 
   --diffs-font-family: var(--mono);
   --diffs-font-size: 12.5px;
@@ -77,8 +75,6 @@
     --popover: #ffffff;
     --button: #ffffff;
     --band: #fafafb;
-    --sep: #ececef;
-    --sep-strong: #d4d4da;
     color-scheme: light;
   }
 
@@ -1521,20 +1517,4 @@ kbd {
   font: 500 11px/1 var(--mono);
   color: var(--text-3);
   text-align: center;
-}
-
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 48px;
-  z-index: 60;
-  padding: 6px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--popover);
-  color: var(--text-2);
-  font-size: var(--fs-small);
-  transform: translateX(-50%);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-  animation: fade-in 110ms var(--ease);
 }

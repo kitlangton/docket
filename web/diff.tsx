@@ -2,7 +2,7 @@ import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from "@p
 import { FileDiff, type FileDiffOptions } from "@pierre/diffs/react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note, Side } from "../src/types"
-import { separatorCSS, stampSeparators, type SeparatorStyle } from "./separators"
+import { SEPARATOR_CSS, stampSeparators } from "./separators"
 
 export type Draft = { path: string; side: Side; startLine?: number; line: number; body: string; noteId?: string }
 
@@ -21,7 +21,6 @@ export type FileBlockProps = {
   /** Visual mode: show the selection as a range instead of the cursor. */
   visual: boolean
   diffStyle: "split" | "unified"
-  separator: SeparatorStyle
   onLine: (file: number, side: Side, line: number) => void
   /** A range picked with the mouse; `compose` is true when it came from the gutter + button. */
   onRange: (file: number, range: SelectedLineRange, compose: boolean) => void
@@ -84,7 +83,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       hunkSeparators: "line-info-basic",
       lineDiffType: "word-alt",
       overflow: "scroll",
-      unsafeCSS: BASE_CSS + separatorCSS(props.separator) + (props.visual ? VISUAL_CSS : CURSOR_CSS),
+      unsafeCSS: BASE_CSS + SEPARATOR_CSS + (props.visual ? VISUAL_CSS : CURSOR_CSS),
       onPostRender: (node, _instance, phase) => {
         if (phase !== "unmount") stampSeparators(node, props.file)
       },
@@ -96,7 +95,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       },
       onLineClick: (event) => onLine(index, event.annotationSide, event.lineNumber),
     }),
-    [props.diffStyle, props.separator, props.visual, props.file, onLine, onRange, index],
+    [props.diffStyle, props.visual, props.file, onLine, onRange, index],
   )
 
   const annotations = useMemo(() => {

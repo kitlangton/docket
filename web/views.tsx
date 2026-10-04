@@ -398,7 +398,6 @@ const HELP: [string, [string, string][]][] = [
       ["o", "Fold / unfold file"],
       ["t", "Split / unified"],
       ["z", "Ignore whitespace"],
-      [",", "Cycle separator style"],
       ["O", "Open on GitHub"],
       [":", "Summary"],
       ["w", "Hand back (in summary)"],
