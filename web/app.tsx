@@ -11,11 +11,11 @@ import {
   type Verdict,
 } from "../src/types"
 import { Home } from "./home"
-import { FileBlock, type Draft } from "./diff"
+import { FileBlock, OutdatedNotes, type Draft } from "./diff"
 import { rowElement } from "./dom"
 import { expandAround, fileKey, loader } from "./expand"
 import { FileTree, treeRows, type TreeRow } from "./tree"
-import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
+import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, noteLocation, rangeAnchor, type PrModel, type Row } from "./model"
 import { feed, keyName, type Action, type Binding, type Mode, type Pending } from "./keymap"
 import {
   CommandBar,
@@ -144,7 +144,7 @@ function MissingSession(props: { onHome: () => void }) {
 type PromptState = { kind: "reject" } | { kind: "note"; noteId?: string; initial: string }
 type ScrollIntent = "top" | "visible" | "none" | "center" | "tight" | "bottom"
 type Position = { id: string; index: number }
-type VerdictValue = { verdict: Verdict | null; reason?: string }
+type VerdictValue = { verdict: Verdict | null; reason?: string; reviewedHead?: string }
 type Bar = { kind: "command" | "confirm"; text: string }
 
 const EMPTY_PENDING: Pending = { count: "", keys: [] }
@@ -189,7 +189,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const [folds, setFolds] = useState<Record<string, boolean>>({})
   const [stamped, setStamped] = useState<string | null>(null)
   const mainRef = useRef<HTMLDivElement>(null)
-  const scrollIntent = useRef<ScrollIntent>("top")
+  // Each request is a new object, so asking for the same placement twice still scrolls.
+  const [scrollRequest, setScrollRequest] = useState<{ intent: ScrollIntent }>({ intent: "top" })
   const [pending, setPending] = useState("")
   const pendingRef = useRef<Pending>(EMPTY_PENDING)
   const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -209,25 +210,25 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     return Boolean(reviewed && head && reviewed !== head)
   }
 
-  const models = useMemo(() => {
-    const result = new Map<string, PrModel>()
-    entries.forEach((entry) => {
-      const load = session.items[entry.id]
-      if (!load?.ok) return
-      const head = load.data.meta.headRefOid
-      const since = interdiffs[entry.id]
-      if (since?.on && since.head === head)
-        return result.set(entry.id, buildModel(since.patch, `${entry.id}-${since.from}-${head}`, entry.pr.focus))
-      const patch = ignoreWhitespace ? load.data.patchIgnoreWhitespace : load.data.patch
-      result.set(entry.id, buildModel(patch, `${entry.id}-${head}-${ignoreWhitespace ? "w" : ""}`, entry.pr.focus))
-    })
-    return result
-  }, [entries, session.items, ignoreWhitespace, interdiffs])
-  const updatedIds = new Set(order.filter(isUpdated))
-  const sinceReview = Boolean(interdiffs[current]?.on && interdiffs[current]?.head === headOf(current))
+  const updatedIds = useMemo(() => new Set(order.filter(isUpdated)), [order, state.reviews, session.items])
 
   const entry = entries[order.indexOf(current)]!
-  const model = models.get(current)
+  const load = session.items[current]
+  const meta = load?.ok ? load.data.meta : undefined
+  const since = interdiffs[current]
+  const sinceReview = Boolean(since?.on && meta && since.head === meta.headRefOid)
+  // Only the current PR is parsed, and only again when its patch or key changes; refetches keep equal strings.
+  const patch = !load?.ok ? undefined : sinceReview ? since!.patch : ignoreWhitespace ? load.data.patchIgnoreWhitespace : load.data.patch
+  const modelKey = !meta
+    ? ""
+    : sinceReview
+      ? `${current}-${since!.from}-${meta.headRefOid}`
+      : `${current}-${meta.baseOid ?? ""}-${meta.headRefOid}-${ignoreWhitespace ? "w" : ""}`
+  const focusKey = entry.pr.focus?.join("\n") ?? ""
+  const model: PrModel | undefined = useMemo(
+    () => (patch === undefined ? undefined : buildModel(patch, modelKey, focusKey ? focusKey.split("\n") : [])),
+    [patch, modelKey, focusKey],
+  )
   const review = state.reviews[current]
   const prNotes = useMemo(() => (review?.notes ?? []).filter((note) => !note.path), [review?.notes])
   const cursorIndex = model?.rows.length ? Math.min(cursors[current] ?? HEADER, model.rows.length - 1) : HEADER
@@ -236,12 +237,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const isCollapsed = (fileIndex: number) => {
     const file = model?.files[fileIndex]
     if (!file) return false
-    const folded = file.type === "deleted" || viewed.has(file.name) || (model.large && !model.focus.has(file.name))
-    return folds[`${current}:${file.name}`] ?? folded
+    return folds[`${current}:${file.name}`] ?? defaultFolded(model, viewed, file)
   }
   // Blocks inside a folded file collapse into one stop at that file's header.
   const navBlocks = (model?.blocks ?? []).filter(
-    (block, index, blocks) => !isCollapsed(block.file) || blocks.findIndex((b) => b.file === block.file) === index,
+    (block, index, blocks) => !isCollapsed(block.file) || index === 0 || blocks[index - 1]!.file !== block.file,
   )
 
   const reviewedCount = order.filter((id) => state.reviews[id]?.verdict).length
@@ -294,7 +294,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   }, [])
 
   const goTo = useCallback((id: string) => {
-    scrollIntent.current = "top"
+    setScrollRequest({ intent: "top" })
     setDraft(null)
     setVisual(null)
     setNoteFocus(null)
@@ -305,7 +305,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   const moveCursor = useCallback(
     (index: number, intent: ScrollIntent, mode: "block" | "line" = "block") => {
-      scrollIntent.current = intent
+      if (intent !== "none") setScrollRequest({ intent })
       setCursorMode(mode)
       setNoteFocus(null)
       setCursors((prev) => ({ ...prev, [current]: index }))
@@ -315,26 +315,22 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   const decide = (verdict: Verdict, reason?: string) => {
     const before = state.reviews[current]
+    const after: VerdictValue = {
+      verdict,
+      reason: verdict === "reject" ? reason || undefined : undefined,
+      reviewedHead: headOf(current) ?? before?.reviewedHead,
+    }
     undoRef.current.push({
       id: current,
-      before: { verdict: before?.verdict ?? null, reason: before?.reason },
-      after: { verdict, reason: verdict === "reject" ? reason || undefined : undefined },
+      before: { verdict: before?.verdict ?? null, reason: before?.reason, reviewedHead: before?.reviewedHead },
+      after,
     })
     redoRef.current = []
     const next = nextUnreviewed(order, { ...state, reviews: { ...state.reviews, [current]: { ...EMPTY_REVIEW, verdict } } }, current)
-    updateReview(current, (prev) => ({
-      ...prev,
-      verdict,
-      reason: verdict === "reject" ? reason || undefined : undefined,
-      reviewedHead: headOf(current) ?? prev.reviewedHead,
-    }))
+    updateReview(current, (prev) => ({ ...prev, ...after }))
     setStamped(current)
     setTimeout(() => setStamped((value) => (value === current ? null : value)), 400)
-    if (next === undefined) {
-      setSummaryIndex(order.indexOf(current))
-      setView("summary")
-      return
-    }
+    if (next === undefined) return openSummary()
     recordJump()
     goTo(next)
   }
@@ -351,8 +347,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
         (note) => note.path === path && note.side === anchor.side && note.line === anchor.line && note.startLine === anchor.startLine,
       )
       setVisual(null)
-      setCursorMode("line")
-      setCursors((prev) => ({ ...prev, [current]: Math.max(a, b) }))
+      moveCursor(Math.max(a, b), "none", "line")
       setDraft({
         path,
         side: anchor.side,
@@ -362,7 +357,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
         noteId: existing?.id,
       })
     },
-    [model, state.reviews, current],
+    [model, state.reviews, current, moveCursor],
   )
 
   const saveDraft = useCallback(
@@ -393,7 +388,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   /** The text of a draft's anchor line, from the diff model. */
   function draftLineText(target: Draft) {
     const fileIndex = model?.files.findIndex((file) => file.name === target.path) ?? -1
-    return model?.rows.find((row) => row.file === fileIndex && row.side === target.side && row.line === target.line)?.text
+    return model?.rows[rowIndex(fileIndex, target.side, target.line)]?.text
   }
 
   const savePrNote = (noteId: string | undefined, body: string) => {
@@ -415,9 +410,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       const file = model?.files.find((item) => item.name === path)
       if (!model || !file) return
       const key = `${current}:${path}`
-      const folded = file.type === "deleted" || viewed.has(path) || (model.large && !model.focus.has(path))
-      scrollIntent.current = "top"
-      setFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? folded) }))
+      setFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? defaultFolded(model, viewed, file)) }))
     },
     [model, current, viewed],
   )
@@ -448,19 +441,26 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       if (a < 0 || b < 0) return
       if (compose) return openRangeDraft(a, b)
       if (a === b) return clickLine(file, range.side ?? "additions", range.start)
-      setCursorMode("line")
-      setCursors((prev) => ({ ...prev, [current]: b }))
+      moveCursor(b, "none", "line")
       setVisual({ anchor: a, pill: { ...pointer.current } })
     },
-    [rowIndex, openRangeDraft, clickLine, current],
+    [rowIndex, openRangeDraft, clickLine, moveCursor],
   )
 
-  /** Moves the cursor to a file: its first change, or its header when folded or empty. */
+  /** A file's first change, or its first row when it has no changes (or its header row when it has no lines). */
+  const fileStart = (fileIndex: number) =>
+    navBlocks.find((b) => b.file === fileIndex)?.first ?? (model?.rows ?? []).findIndex((row) => row.file === fileIndex)
   const jumpToFile = (fileIndex: number) => {
-    const rows = model?.rows ?? []
-    const index = navBlocks.find((b) => b.file === fileIndex)?.first ?? rows.findIndex((row) => row.file === fileIndex)
-    if (index >= 0) return moveCursor(index, "top")
-    mainRef.current?.querySelector(`[data-file-index="${fileIndex}"]`)?.scrollIntoView({ block: "start" })
+    const index = fileStart(fileIndex)
+    if (index >= 0) moveCursor(index, "top")
+  }
+  const unfold = (fileIndex: number) => {
+    if (isCollapsed(fileIndex)) setFold(fileIndex, false)
+  }
+  /** Unfolds a file and moves to it. */
+  const openFile = (fileIndex: number) => {
+    unfold(fileIndex)
+    jumpToFile(fileIndex)
   }
 
   const toggleViewed = () => {
@@ -496,8 +496,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   // Scroll the cursor into place after it moves or the PR changes. Always instant: no smooth scrolling.
   useEffect(() => {
-    const intent = scrollIntent.current
-    scrollIntent.current = "none"
+    const intent = scrollRequest.intent
     const main = mainRef.current
     if (!main || view !== "deck" || intent === "none") return
     if (!cursor) {
@@ -511,7 +510,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     }
     attempt()
     return () => cancelAnimationFrame(frame.id)
-  }, [cursorIndex, current, view, diffStyle, cursor])
+  }, [scrollRequest])
 
   // A new object each time, so repeating a message restarts its timer.
   const say = (text: string) => setMessage({ text })
@@ -529,7 +528,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     jumps.index = jumps.list.length
   }
   const restore = (pos: Position) => {
-    scrollIntent.current = pos.index === HEADER ? "top" : "visible"
+    setScrollRequest({ intent: pos.index === HEADER ? "top" : "visible" })
     setVisual(null)
     setDraft(null)
     setCursorMode(pos.index === HEADER ? "block" : "line")
@@ -553,6 +552,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     restore(jumps.list[target]!)
   }
   const switchPr = (id: string) => {
+    setView("deck")
     if (id === current) return
     recordJump()
     goTo(id)
@@ -560,7 +560,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   // --- Verdict undo / redo (this session only).
   const applyVerdict = (id: string, value: VerdictValue, verb: string) => {
-    updateReview(id, (prev) => ({ ...prev, verdict: value.verdict, reason: value.reason }))
+    updateReview(id, (prev) => ({ ...prev, ...value }))
     if (id !== current) goTo(id)
     const label = entries.find((item) => item.id === id)?.pr
     say(`${verb} ${label ? itemLabel(label) : id}: ${value.verdict ?? "no verdict"}`)
@@ -595,7 +595,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     if (set) {
       const next = set[2] ? !wrap : !set[1]
       localStorage.setItem("docket.wrap", next ? "on" : "off")
-      scrollIntent.current = "visible"
       return setWrap(next)
     }
     if (/^#?\d+$/.test(command)) {
@@ -603,7 +602,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       const target =
         entries.find((item) => item.pr.number === value) ?? (value >= 1 && value <= entries.length ? entries[value - 1] : undefined)
       if (!target) return say(`No PR ${command}`)
-      setView("deck")
       return switchPr(target.id)
     }
     if (command) say(`Not a command: ${command}`)
@@ -676,10 +674,20 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     if (settle === "line") return clampCursor()
     const rows = model?.rows ?? []
     const sticky = stickyTop()
-    const visible = navBlocks.find((b) => {
-      const element = rows[b.first] && rowElement(main, rows[b.first]!)
+    const belowSticky = (block: (typeof navBlocks)[number]) => {
+      const element = rows[block.first] && rowElement(main, rows[block.first]!)
       return element ? element.getBoundingClientRect().top - main.getBoundingClientRect().top >= sticky : false
-    })
+    }
+    // The first block below the sticky headers, searched outward from the cursor's block rather than from the top.
+    const from = Math.max(
+      0,
+      navBlocks.findIndex((b) => b.first >= cursorIndex),
+    )
+    const start = navBlocks[from]
+    if (!start) return
+    const visible = belowSticky(start)
+      ? navBlocks[navBlocks.slice(0, from).findLastIndex((b) => !belowSticky(b)) + 1]
+      : navBlocks.find((b, index) => index > from && belowSticky(b))
     if (visible) moveCursor(visible.first, "none")
   }
 
@@ -687,12 +695,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const setFold = (fileIndex: number, folded: boolean) => {
     const file = model?.files[fileIndex]
     if (!file) return
-    scrollIntent.current = "top"
     setFolds((prev) => ({ ...prev, [`${current}:${file.name}`]: folded }))
   }
   const setAllFolds = (folded: boolean) => {
     if (!model) return
-    scrollIntent.current = "top"
     setFolds((prev) => ({ ...prev, ...Object.fromEntries(model.files.map((file) => [`${current}:${file.name}`, folded])) }))
   }
 
@@ -701,8 +707,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     const head = headOf(current)
     if (!from || !head || from === head) return say("No changes since your review")
     const known = interdiffs[current]
-    scrollIntent.current = "top"
-    setCursors((prev) => ({ ...prev, [current]: HEADER }))
+    moveCursor(HEADER, "top")
     if (known && known.from === from && known.head === head)
       return setInterdiffs((prev) => ({ ...prev, [current]: { ...known, on: !known.on } }))
     const id = current
@@ -717,8 +722,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     if (sinceReview) return say("Context can't expand in the since-review diff")
     if (!loadFiles || !meta) return say("Context isn't available for this PR")
     if (!cursor || !model) return say("Move to a change first")
+    if (cursor.kind === "file") return say("This file has no lines")
     const file = model.files[cursor.file]!
-    if (isCollapsed(cursor.file)) setFold(cursor.file, false)
+    unfold(cursor.file)
     expandAround(fileKey(session.id, current, meta.headRefOid, file.name, ignoreWhitespace), cursor.hunk, all)
   }
 
@@ -745,8 +751,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     setTreeSelected(row.path)
     if (row.kind === "dir") return toggleTreeDir(row.path)
     recordJump()
-    if (isCollapsed(row.index)) setFold(row.index, false)
-    jumpToFile(row.index)
+    openFile(row.index)
     setTreeFocus(false)
   }
 
@@ -778,10 +783,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     const from = cursor?.file ?? (direction === 1 ? -1 : files.length)
     const candidates = files.map((file, index) => ({ file, index })).filter(({ file }) => !viewed.has(file.name))
     const target = direction === 1 ? candidates.find(({ index }) => index > from) : candidates.findLast(({ index }) => index < from)
-    if (target) {
-      if (isCollapsed(target.index)) setFold(target.index, false)
-      return jumpToFile(target.index)
-    }
+    if (target) return openFile(target.index)
     if (direction === -1) return say("No unviewed file above")
     const next = nextUnreviewed(order, state, current)
     if (next) return switchPr(next)
@@ -793,8 +795,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     const file = cursor?.file ?? HEADER
     const startsInFile = cursor && rows.findIndex((row) => row.file === file) < cursorIndex
     const target = direction === 1 ? file + count : startsInFile ? file - count + 1 : file - count
-    const index = navBlocks.find((b) => b.file === target)?.first ?? rows.findIndex((row) => row.file === target)
-    if (index >= 0) moveCursor(index, "top")
+    jumpToFile(target)
   }
 
   const changeStep = (direction: 1 | -1, count: number) => {
@@ -811,11 +812,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const gotoLine = (line: number) => {
     const rows = model?.rows ?? []
     const file = cursor?.file ?? 0
-    const inFile = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.file === file && row.side === "additions")
+    const inFile = rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => row.file === file && row.side === "additions" && row.kind !== "file")
     const hit = inFile.find(({ row }) => row.line >= line) ?? inFile.at(-1)
     if (!hit) return say(`No line ${line}`)
     recordJump()
-    if (isCollapsed(file)) setFold(file, false)
+    unfold(file)
     moveCursor(hit.index, "center", "line")
     if (hit.row.line !== line) say(`Line ${line} is not in the diff; nearest is ${hit.row.line}`)
   }
@@ -824,7 +827,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     const rows = model?.rows ?? []
     const start = cursor ? cursorIndex : (navBlocks[0]?.first ?? 0)
     if (!rows[start]) return
-    if (isCollapsed(rows[start]!.file)) toggleFold(model!.files[rows[start]!.file]!.name)
+    if (rows[start]!.kind === "file") return say("This file has no lines")
+    unfold(rows[start]!.file)
     moveCursor(start, cursor ? "none" : "top", "line")
     setVisual({ anchor: start })
   }
@@ -842,7 +846,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   }
 
   // Each action returns false when it does not apply here, so the next mode can handle the key.
-  const actions: Partial<Record<Action, (count: number | undefined) => boolean | void>> = {
+  // Every deck action needs a handler; the inbox handles its own.
+  const actions: Record<Exclude<Action, `home${string}`>, (count: number | undefined) => boolean | void> = {
     goHome: () => props.onHome(),
     changeNext: (count) => changeStep(1, count ?? 1),
     changePrev: (count) => changeStep(-1, count ?? 1),
@@ -886,8 +891,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     skip: () => decide("skip"),
     undo,
     redo,
-    comment: () => setPrompt({ kind: "note", initial: "" }),
-    commentPr: () => {
+    comment: () => {
       setVisual(null)
       setPrompt({ kind: "note", initial: "" })
     },
@@ -909,7 +913,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     noteEdit: () => {
       const focused = noteFocus === null ? undefined : prNotes[noteFocus]
       if (!focused) return false
-      setPrompt({ kind: "note", noteId: focused.id, initial: focused.body })
+      editNote(focused)
     },
     noteDelete: () => {
       const focused = noteFocus === null ? undefined : prNotes[noteFocus]
@@ -960,12 +964,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     splitToggle: () => {
       const next = diffStyle === "split" ? "unified" : "split"
       localStorage.setItem("docket.diffStyle", next)
-      scrollIntent.current = "top"
+      setScrollRequest({ intent: "top" })
       setDiffStyle(next)
     },
     whitespaceToggle: () => {
-      scrollIntent.current = "top"
-      setCursors((prev) => ({ ...prev, [current]: HEADER }))
+      moveCursor(HEADER, "top")
       setIgnoreWhitespace((value) => !value)
     },
     openGithub: () => {
@@ -974,18 +977,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     },
     commandLine: openBar,
     summary: () => {
-      if (cursor && model && isCollapsed(cursor.file)) return void toggleFold(model.files[cursor.file]!.name)
+      if (cursor && isCollapsed(cursor.file)) return unfold(cursor.file)
       openSummary()
     },
-    handBackClose: () => void handBack(),
     help: () => setHelp(true),
     cancel: () => setNoteFocus(null),
     summaryNext: () => setSummaryIndex((index) => Math.min(order.length - 1, index + 1)),
     summaryPrev: () => setSummaryIndex((index) => Math.max(0, index - 1)),
-    summaryOpen: () => {
-      setView("deck")
-      switchPr(order[summaryIndex]!)
-    },
+    summaryOpen: () => switchPr(order[summaryIndex]!),
     summaryBack: () => setView("deck"),
     handBack: () => void handBack(),
   }
@@ -993,7 +992,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   /** Runs a binding; if its action declines, the key is offered to the remaining modes. */
   const run = (binding: Binding, mode: Mode, count: number | undefined, key: string, modes: Mode[]): boolean => {
     if (visual && mode === "normal") setVisual(null)
-    const action = actions[binding.action]
+    const action = binding.action in actions ? actions[binding.action as keyof typeof actions] : undefined
     if (action && action(count) !== false) return true
     const rest = modes.slice(modes.indexOf(mode) + 1)
     if (!rest.length) return false
@@ -1063,7 +1062,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     review?.notes.forEach((note) => {
       if (!note.path) return
       const fileIndex = model?.files.findIndex((file) => file.name === note.path) ?? -1
-      const row = model?.rows.find((item) => item.file === fileIndex && item.side === note.side && item.line === note.line)
+      const row = note.side && note.line !== undefined ? model?.rows[rowIndex(fileIndex, note.side, note.line)] : undefined
       const changed = !row || (note.text !== undefined && row.text !== note.text)
       const outdated = !sinceReview && changed && Boolean(note.head && note.head !== head)
       const bucket = map.get(note.path) ?? { live: [], outdated: [] }
@@ -1071,7 +1070,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
       map.set(note.path, bucket)
     })
     return map
-  }, [review?.notes, model, sinceReview, session.items, current])
+  }, [review?.notes, model, rowIndex, sinceReview, session.items, current])
 
   // Notes on files the PR no longer touches.
   const orphanNotes = model
@@ -1081,15 +1080,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     : []
 
   const selectionFor = (fileIndex: number) => {
-    if (!cursor || cursor.file !== fileIndex || !model) return null
-    if (visual) return rangeAnchor(model.rows, visual.anchor, cursorIndex).selection
+    if (!cursor || cursor.file !== fileIndex || !model || cursor.kind === "file") return null
+    if (visualAnchor) return visualAnchor.selection
     const block = cursor.block === null ? undefined : model.blocks[cursor.block]
     if (cursorMode === "block" && block) return block.range
     return { start: cursor.line, end: cursor.line, side: cursor.side }
   }
 
-  const load = session.items[current]
-  const meta = load?.ok ? load.data.meta : undefined
   const loadFiles = useMemo(
     () => (meta ? loader(props.base, meta.baseOid, meta.headRefOid) : undefined),
     [props.base, meta?.baseOid, meta?.headRefOid],
@@ -1099,8 +1096,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
   const statusPosition = visual
     ? `VISUAL · ${visualCount} line${visualCount === 1 ? "" : "s"} · c to comment`
     : cursor && model
-      ? `${model.files[cursor.file]?.name.split("/").at(-1)}:${cursor.side === "deletions" ? "L" : "R"}${cursor.line}`
+      ? `${model.files[cursor.file]?.name.split("/").at(-1)}${cursor.kind === "file" ? "" : `:${cursor.side === "deletions" ? "L" : "R"}${cursor.line}`}`
       : ""
+
+  const onPickTree = useStableCallback(pickTreeRow)
+  const onSelectPr = useStableCallback(switchPr)
 
   if (handedBack) return <HandedBack path={handedBack} state={state} order={order} onHome={props.onHome} />
 
@@ -1115,14 +1115,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
         updated={updatedIds}
         tree={
           treeOn && model && view === "deck" ? (
-            <FileTree rows={tree} selected={treeSelected} current={currentFile} focused={treeFocus} viewed={viewed} onPick={pickTreeRow} />
+            <FileTree rows={tree} selected={treeSelected} current={currentFile} focused={treeFocus} viewed={viewed} onPick={onPickTree} />
           ) : undefined
         }
         onHome={props.onHome}
-        onSelect={(id) => {
-          setView("deck")
-          switchPr(id)
-        }}
+        onSelect={onSelectPr}
       />
       {view === "summary" ? (
         <Summary
@@ -1133,10 +1130,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
           selected={summaryIndex}
           outPath={session.outPath}
           onHandBack={handBack}
-          onOpen={(id) => {
-            switchPr(id)
-            setView("deck")
-          }}
+          onOpen={switchPr}
         />
       ) : (
         <main className="main" ref={mainRef}>
@@ -1154,24 +1148,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
                   : null
               }
             />
-            <PrNotes
-              notes={prNotes}
-              focus={cursorIndex === HEADER ? noteFocus : null}
-              onEdit={(note) => setPrompt({ kind: "note", noteId: note.id, initial: note.body })}
-              onDelete={deleteNote}
-            />
-            {orphanNotes.length ? (
-              <div className="outdated orphan-notes">
-                {orphanNotes.map((note) => (
-                  <div key={note.id} className="note is-outdated">
-                    <span className="note-range">
-                      Outdated · {note.path?.split("/").at(-1)}:{note.line}
-                    </span>
-                    <span className="note-body">{note.body}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
+            <PrNotes notes={prNotes} focus={cursorIndex === HEADER ? noteFocus : null} onEdit={editNote} onDelete={deleteNote} />
+            {orphanNotes.length ? <OutdatedNotes notes={orphanNotes} where={noteLocation} className="orphan-notes" /> : null}
             {load && !load.ok ? (
               <div className="error">
                 Could not load {current}: {load.error}
@@ -1277,8 +1255,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
           onPick={(index) => {
             setPalette(false)
             recordJump()
-            if (isCollapsed(index)) setFold(index, false)
-            jumpToFile(index)
+            openFile(index)
           }}
         />
       ) : null}
@@ -1312,3 +1289,15 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 }
 
 const NO_NOTES: Note[] = []
+
+/** A file folds by default when it's deleted, viewed, or outside the focus of a large PR. */
+function defaultFolded(model: PrModel, viewed: ReadonlySet<string>, file: PrModel["files"][number]) {
+  return file.type === "deleted" || viewed.has(file.name) || (model.large && !model.focus.has(file.name))
+}
+
+/** A stable function that always calls the newest `fn`, so memoized children don't re-render for it. */
+function useStableCallback<A extends unknown[]>(fn: (...args: A) => void) {
+  const latest = useRef(fn)
+  latest.current = fn
+  return useCallback((...args: A) => latest.current(...args), [])
+}

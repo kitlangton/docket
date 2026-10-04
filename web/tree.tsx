@@ -1,5 +1,5 @@
 import type { FileDiffMetadata } from "@pierre/diffs"
-import { useEffect, useRef } from "react"
+import { memo, useEffect, useRef } from "react"
 import { StatusIcon } from "./diff"
 
 export type TreeRow =
@@ -43,7 +43,7 @@ function mergeChain(name: string, dir: Dir): { name: string; dir: Dir } {
   return mergeChain(`${name}/${only[0]}`, only[1])
 }
 
-export function FileTree(props: {
+export const FileTree = memo(function FileTree(props: {
   rows: TreeRow[]
   selected: string | null
   current: number | null
@@ -86,4 +86,4 @@ export function FileTree(props: {
       ))}
     </div>
   )
-}
+})

@@ -3,6 +3,7 @@ import { FileDiff, type FileDiffOptions } from "@pierre/diffs/react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note, Side } from "../src/types"
 import { attach, detach, onSeparatorClick } from "./expand"
+import { lineLabel } from "./model"
 import { NOTE_RANGE_CSS, type NoteRange, stampNoteRanges } from "./note-ranges"
 import { SEPARATOR_CSS, stampSeparators } from "./separators"
 
@@ -158,27 +159,11 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
     (annotation: DiffLineAnnotation<AnnotationMeta>) => {
       const meta = annotation.metadata
       if (meta.kind === "draft") return <DraftEditor draft={meta.draft} onSave={onSaveDraft} onCancel={onCancelDraft} />
-      if (meta.kind === "outdated")
-        return (
-          <div className="outdated">
-            {meta.notes.map((note) => (
-              <div key={note.id} className="note is-outdated">
-                <span className="note-range">
-                  Outdated · {note.startLine ? `Lines ${note.startLine}–${note.line}` : `Line ${note.line}`}
-                </span>
-                <span className="note-body">{note.body}</span>
-              </div>
-            ))}
-          </div>
-        )
+      if (meta.kind === "outdated") return <OutdatedNotes notes={meta.notes} where={lineLabel} />
       return (
         <div className="note" onClick={() => onEditNote(meta.note)}>
           <div className="note-head">
-            <span className="note-range">
-              {meta.note.startLine !== undefined && meta.note.startLine !== meta.note.line
-                ? `Lines ${meta.note.startLine}–${meta.note.line}`
-                : `Line ${meta.note.line}`}
-            </span>
+            <span className="note-range">{lineLabel(meta.note)}</span>
           </div>
           <div className="note-body">{meta.note.body}</div>
         </div>
@@ -199,7 +184,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
         onToggle={onToggle}
       />
     ),
-    [props.focus, props.collapsed, props.viewed, props.cursorHere, props.notes.length, onToggle],
+    [props.focus, props.collapsed, props.viewed, props.cursorHere, props.notes.length, props.outdated.length, onToggle],
   )
 
   const className = `file${props.viewed ? " is-viewed" : ""}`
@@ -225,6 +210,20 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
     </section>
   )
 })
+
+/** Notes whose line is gone at the current head. `where` says where each one was. */
+export function OutdatedNotes(props: { notes: Note[]; where: (note: Note) => string; className?: string }) {
+  return (
+    <div className={`outdated${props.className ? ` ${props.className}` : ""}`}>
+      {props.notes.map((note) => (
+        <div key={note.id} className="note is-outdated">
+          <span className="note-range">Outdated · {props.where(note)}</span>
+          <span className="note-body">{note.body}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function FileHeader(props: {
   file: FileDiffMetadata
@@ -314,7 +313,7 @@ function DraftEditor(props: { draft: Draft; onSave: (body: string) => void; onCa
         ref={ref}
         value={body}
         rows={Math.min(8, Math.max(2, body.split("\n").length))}
-        placeholder={props.draft.startLine ? `Lines ${props.draft.startLine}–${props.draft.line}` : `Line ${props.draft.line}`}
+        placeholder={lineLabel(props.draft)}
         onChange={(event) => setBody(event.target.value)}
         onKeyDown={(event) => {
           event.stopPropagation()

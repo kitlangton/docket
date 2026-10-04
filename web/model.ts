@@ -1,13 +1,16 @@
 import { parsePatchFiles, type FileDiffMetadata, type SelectedLineRange } from "@pierre/diffs"
 import { itemId, type Manifest, type ManifestItem, type PrReview, type ReviewState, type Side, type Verdict } from "../src/types"
 
-/** `hunk` is the row's hunk index within its file, which names the context gaps around it. */
+/**
+ * `hunk` is the row's hunk index within its file, which names the context gaps around it. A file with no lines
+ * (a pure rename, a binary or mode change) gets one `file` row, so the cursor can still land on it.
+ */
 export type Row = {
   file: number
   hunk: number
   side: Side
   line: number
-  kind: "context" | "add" | "del"
+  kind: "context" | "add" | "del" | "file"
   block: number | null
   text: string
 }
@@ -31,7 +34,8 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
   const files = [...parsed.filter((file) => focus.has(file.name)), ...parsed.filter((file) => !focus.has(file.name))]
   const rows: Row[] = []
   const blocks: Block[] = []
-  files.forEach((file, fileIndex) =>
+  files.forEach((file, fileIndex) => {
+    if (!file.hunks.length) rows.push({ file: fileIndex, hunk: 0, side: "additions", line: 0, kind: "file", block: null, text: "" })
     file.hunks.forEach((hunk, hunkIndex) => {
       const pos = { old: hunk.deletionStart, new: hunk.additionStart }
       hunk.hunkContent.forEach((content, contentIndex) => {
@@ -64,8 +68,8 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
           range: { start: start.line, side: start.side, end: end.line, endSide: end.side },
         }
       })
-    }),
-  )
+    })
+  })
   return { files, focus, rows, blocks, large: files.length > LARGE_FILES || rows.length > LARGE_LINES }
 }
 
@@ -85,6 +89,11 @@ export function rangeAnchor(rows: Row[], a: number, b: number) {
     startLine: startLine < last.line ? startLine : undefined,
     selection: { start: first.line, side: first.side, end: last.line, endSide: last.side } satisfies SelectedLineRange,
   }
+}
+
+/** "Line 5" or "Lines 3–5". */
+export function lineLabel(note: { startLine?: number; line?: number }) {
+  return note.startLine !== undefined && note.startLine !== note.line ? `Lines ${note.startLine}–${note.line}` : `Line ${note.line}`
 }
 
 export function noteLocation(note: { path?: string; startLine?: number; line?: number }) {

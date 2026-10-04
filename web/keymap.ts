@@ -34,7 +34,6 @@ export type Action =
   | "undo"
   | "redo"
   | "comment"
-  | "commentPr"
   | "visual"
   | "visualDown"
   | "visualUp"
@@ -67,7 +66,6 @@ export type Action =
   | "openGithub"
   | "commandLine"
   | "summary"
-  | "handBackClose"
   | "help"
   | "cancel"
   | "summaryNext"
@@ -131,7 +129,7 @@ export const KEYMAP: Binding[] = [
   { keys: ["u"], action: "undo", label: "Undo verdict change", group: "Review" },
   { keys: ["C-r"], action: "redo", label: "Redo verdict change", group: "Review" },
   { keys: ["c"], action: "comment", label: "Comment on the PR", group: "Review" },
-  { keys: ["C"], action: "commentPr", label: "Comment on the PR (also in visual mode)", group: "Review", modes: ["normal", "visual"] },
+  { keys: ["C"], action: "comment", label: "Comment on the PR (also in visual mode)", group: "Review", modes: ["normal", "visual"] },
   { keys: ["V", "v"], action: "visual", label: "Select lines (visual mode)", group: "Review" },
   { keys: ["j", "C-n", "ArrowDown"], action: "visualDown", label: "Extend selection down", group: "Review", modes: ["visual"] },
   { keys: ["k", "C-p", "ArrowUp"], action: "visualUp", label: "Extend selection up", group: "Review", modes: ["visual"] },
@@ -160,7 +158,7 @@ export const KEYMAP: Binding[] = [
     modes: ["normal", "summary"],
   },
   { keys: ["Enter"], action: "summary", label: "Summary (unfolds a folded file first)", group: "Commands" },
-  { keys: ["Z Z"], action: "handBackClose", label: "Hand back and close", group: "Commands", modes: ["normal", "summary"] },
+  { keys: ["Z Z"], action: "handBack", label: "Hand back and close", group: "Commands", modes: ["normal", "summary"] },
   { keys: ["f"], action: "palette", label: "Jump to file", group: "Commands" },
   { keys: ["T"], action: "treeToggle", label: "File tree", group: "Commands", modes: ["normal", "tree"] },
   { keys: ["j", "ArrowDown"], action: "treeNext", label: "Next entry", group: "Commands", modes: ["tree"], hidden: true },
@@ -248,7 +246,7 @@ export function displayKeys(sequence: string) {
     .join(" ")
 }
 
-/** Bindings for the help overlay and README, grouped, with duplicates of the same action merged. */
+/** Bindings for the help overlay and README, grouped, without the hidden ones. */
 export function helpRows() {
   return GROUPS.map((group) => ({
     group,

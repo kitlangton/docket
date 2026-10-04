@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   sizeOf,
   type Confidence,
@@ -99,7 +99,7 @@ function groupProgress(group: ManifestGroup, state: ReviewState) {
   return { done: ids.filter((id) => state.reviews[id]?.verdict).length, total: ids.length }
 }
 
-export function Rail(props: {
+export const Rail = memo(function Rail(props: {
   manifest: Manifest
   items: Record<string, ItemLoad>
   state: ReviewState
@@ -182,7 +182,7 @@ export function Rail(props: {
         })}
     </nav>
   )
-}
+})
 
 /**
  * The PR header: one sticky band. On the header cursor it expands in place to show the full description,
@@ -317,37 +317,27 @@ export function VerdictPrompt(props: {
   stale: boolean
   onDecide: (verdict: Verdict) => void
 }) {
-  if (props.verdict && props.stale) {
-    return (
-      <div className={`verdict-prompt is-decided is-stale is-${props.verdict}`}>
-        <Glyph verdict={props.verdict} stale />
-        <span>
-          {VERDICT_LABEL[props.verdict]} {props.label}
-        </span>
-        <span className="pr-updated">updated</span>
-        <span className="spacer" />
-        <VerdictButton verdict="approve" k="a" label="Approve" onDecide={props.onDecide} />
-        <VerdictButton verdict="reject" k="r" label="Reject" onDecide={props.onDecide} />
-        <VerdictButton verdict="skip" k="s" label="Skip" onDecide={props.onDecide} />
-      </div>
-    )
-  }
-  if (props.verdict) {
-    return (
-      <div className={`verdict-prompt is-decided is-${props.verdict}`}>
-        <Glyph verdict={props.verdict} />
-        <span>
-          {VERDICT_LABEL[props.verdict]} {props.label}
-        </span>
-      </div>
-    )
-  }
+  const verdict = props.verdict
+  const stale = Boolean(verdict && props.stale)
   return (
-    <div className="verdict-prompt">
-      <span className="spacer" />
-      <VerdictButton verdict="approve" k="a" label="Approve" onDecide={props.onDecide} />
-      <VerdictButton verdict="reject" k="r" label="Reject" onDecide={props.onDecide} />
-      <VerdictButton verdict="skip" k="s" label="Skip" onDecide={props.onDecide} />
+    <div className={`verdict-prompt${verdict ? ` is-decided is-${verdict}` : ""}${stale ? " is-stale" : ""}`}>
+      {verdict ? (
+        <>
+          <Glyph verdict={verdict} stale={stale} />
+          <span>
+            {VERDICT_LABEL[verdict]} {props.label}
+          </span>
+        </>
+      ) : null}
+      {stale ? <span className="pr-updated">updated</span> : null}
+      {!verdict || stale ? (
+        <>
+          <span className="spacer" />
+          <VerdictButton verdict="approve" k="a" label="Approve" onDecide={props.onDecide} />
+          <VerdictButton verdict="reject" k="r" label="Reject" onDecide={props.onDecide} />
+          <VerdictButton verdict="skip" k="s" label="Skip" onDecide={props.onDecide} />
+        </>
+      ) : null}
     </div>
   )
 }
