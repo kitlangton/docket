@@ -1,14 +1,14 @@
 {
-  "name": "prdeck",
+  "name": "docket",
   "version": "0.1.0",
-  "description": "Keyboard-first local review deck for a batch of pull requests",
+  "description": "Keyboard-first local review docket for a batch of pull requests",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "prdeck": "./bin/prdeck.ts"
+    "docket": "./bin/docket.ts"
   },
   "scripts": {
-    "start": "bun bin/prdeck.ts",
+    "start": "bun bin/docket.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

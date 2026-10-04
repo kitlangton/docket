@@ -1,31 +1,29 @@
-import { basename, dirname, join, resolve } from "node:path"
 import index from "../web/index.html"
-import { loadAll, prNumbers, readCache } from "./load"
-import type { Manifest, PrLoad, Progress, ReviewState, SessionPayload, VerdictsFile } from "./types"
+import { loadAll, manifestItems, readCache } from "./load"
+import type { Session } from "./session"
+import { itemId, type ItemLoad, type Manifest, type Note, type PrReview, type Progress, type ReviewState, type SessionPayload, type VerdictsFile } from "./types"
 
 export type ServeOptions = {
-  sessionPath: string
-  outPath?: string
+  session: Session
   port: number
   refresh: boolean
+  onHandback: (verdicts: VerdictsFile) => void
 }
 
 export async function serve(options: ServeOptions) {
-  const sessionPath = resolve(options.sessionPath)
-  const manifest: Manifest = await Bun.file(sessionPath).json()
-  const outPath = resolve(options.outPath ?? join(dirname(sessionPath), "verdicts.json"))
-  const statePath = join(dirname(sessionPath), `${basename(sessionPath, ".json")}.state.json`)
-  const numbers = prNumbers(manifest)
+  const session = options.session
+  const manifest = session.manifest
+  const ids = manifestItems(manifest).map(itemId)
 
-  const prs: Record<string, PrLoad> = {}
-  const progress: Progress = { done: 0, total: numbers.length, phase: "Starting" }
+  const items: Record<string, ItemLoad> = {}
+  const progress: Progress = { done: 0, total: ids.length, phase: "Starting" }
   const counter = { version: 0 }
 
   const cached = options.refresh ? [] : await readCache(manifest)
   cached.forEach((data) => {
-    prs[data.meta.number] = { ok: true, data }
+    items[data.meta.id] = { ok: true, data }
   })
-  const complete = cached.length === numbers.length
+  const complete = ids.every((id) => items[id])
   progress.done = cached.length
 
   const loading = loadAll(manifest, {
@@ -33,21 +31,19 @@ export async function serve(options: ServeOptions) {
       progress.phase = phase
     },
     loaded: (load) => {
-      const number = load.ok ? load.data.meta.number : load.number
-      const previous = prs[number]
+      const id = load.ok ? load.data.meta.id : load.id
+      const previous = items[id]
       // Keep a good cached copy rather than replacing it with a refresh failure.
       if (!load.ok && previous?.ok) return
       if (load.ok && previous?.ok && JSON.stringify(load.data) === JSON.stringify(previous.data)) return
-      prs[number] = load
-      if (!complete) progress.done = Object.keys(prs).length
+      items[id] = load
+      if (!complete) progress.done = Object.keys(items).length
       counter.version++
     },
   })
-  if (complete) {
-    progress.phase = "Ready"
-    loading.catch((error) => console.error(`prdeck: background refresh failed: ${error}`))
-  }
-  if (!complete) loading.catch((error) => {
+  if (complete) progress.phase = "Ready"
+  loading.catch((error) => {
+    if (complete) return console.error(`docket: background refresh failed: ${error}`)
     progress.phase = `Failed: ${error}`
   })
 
@@ -59,7 +55,15 @@ export async function serve(options: ServeOptions) {
       "/": index,
       "/api/session": {
         GET: () => {
-          const payload: SessionPayload = { manifest, sessionPath, outPath, progress, version: counter.version, prs }
+          const payload: SessionPayload = {
+            manifest,
+            label: session.manifestPath,
+            statePath: session.statePath,
+            outPath: session.outPath,
+            progress,
+            version: counter.version,
+            items,
+          }
           return Response.json(payload)
         },
       },
@@ -67,49 +71,70 @@ export async function serve(options: ServeOptions) {
         GET: () => Response.json({ version: counter.version, progress }),
       },
       "/api/state": {
-        GET: async () => {
-          const file = Bun.file(statePath)
-          if (!(await file.exists())) return Response.json({ current: null, reviews: {} } satisfies ReviewState)
-          return new Response(file, { headers: { "content-type": "application/json" } })
-        },
+        GET: async () => Response.json(await readState(session.statePath)),
         PUT: async (req) => {
           const state: ReviewState = await req.json()
-          await Bun.write(statePath, JSON.stringify(state, null, 2))
+          await Bun.write(session.statePath, JSON.stringify(state, null, 2))
           return Response.json({ ok: true })
         },
       },
-      "/api/verdicts": {
+      "/api/handback": {
         POST: async (req) => {
           const state: ReviewState = await req.json()
-          await Bun.write(statePath, JSON.stringify(state, null, 2))
-          const verdicts = toVerdicts(sessionPath, numbers, state)
-          await Bun.write(outPath, JSON.stringify(verdicts, null, 2) + "\n")
-          return Response.json({ ok: true, path: outPath })
+          await Bun.write(session.statePath, JSON.stringify(state, null, 2))
+          const verdicts = toVerdicts(session.manifestPath, manifest, items, state)
+          await Bun.write(session.outPath, JSON.stringify(verdicts, null, 2) + "\n")
+          // Let the response reach the browser before the process exits.
+          setTimeout(() => options.onHandback(verdicts), 150)
+          return Response.json({ ok: true, path: session.outPath })
         },
       },
     },
     fetch: () => new Response("Not found", { status: 404 }),
   })
-  return { url: `http://127.0.0.1:${server.port}/`, server, statePath, outPath }
+  return { url: `http://127.0.0.1:${server.port}/`, server }
 }
 
-function toVerdicts(sessionPath: string, numbers: number[], state: ReviewState): VerdictsFile {
+type LegacyReview = Partial<PrReview> & { prNote?: string }
+type LegacyState = { version?: number; current?: string | number | null; reviews?: Record<string, LegacyReview> }
+
+/** Reads review state, upgrading files written before PR notes joined the notes list. */
+async function readState(path: string): Promise<ReviewState> {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return { version: 2, current: null, reviews: {} }
+  const raw: LegacyState = await file.json()
+  const reviews = Object.fromEntries(
+    Object.entries(raw.reviews ?? {}).map(([id, review]): [string, PrReview] => {
+      const notes: Note[] = [...(review.prNote ? [{ id: crypto.randomUUID(), body: review.prNote }] : []), ...(review.notes ?? [])]
+      return [id, { verdict: review.verdict ?? null, reason: review.reason, notes, viewed: review.viewed }]
+    }),
+  )
+  return { version: 2, current: raw.current === null || raw.current === undefined ? null : String(raw.current), reviews }
+}
+
+function toVerdicts(sessionPath: string, manifest: Manifest, items: Record<string, ItemLoad>, state: ReviewState): VerdictsFile {
   return {
     session: sessionPath,
     reviewedAt: new Date().toISOString(),
-    prs: numbers.map((number) => {
-      const review = state.reviews[number]
+    prs: manifestItems(manifest).map((item) => {
+      const id = itemId(item)
+      const review = state.reviews[id]
+      const load = items[id]
       return {
-        number,
+        ...(item.number !== undefined ? { number: item.number } : { ref: item.ref }),
+        ...(load?.ok ? { title: load.data.meta.title } : {}),
         verdict: review?.verdict ?? null,
         ...(review?.reason ? { reason: review.reason } : {}),
-        notes: (review?.notes ?? []).map((note) => ({
-          path: note.path,
-          side: note.side === "deletions" ? ("LEFT" as const) : ("RIGHT" as const),
-          line: note.line,
-          body: note.body,
-        })),
-        ...(review?.prNote ? { prNote: review.prNote } : {}),
+        notes: (review?.notes ?? []).map((note) => {
+          if (!note.path || note.line === undefined) return { body: note.body }
+          return {
+            path: note.path,
+            side: note.side === "deletions" ? ("LEFT" as const) : ("RIGHT" as const),
+            ...(note.startLine !== undefined && note.startLine !== note.line ? { startLine: note.startLine } : {}),
+            line: note.line,
+            body: note.body,
+          }
+        }),
       }
     }),
   }

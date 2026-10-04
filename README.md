@@ -1,32 +1,38 @@
-# prdeck
+# docket
 
-A local, keyboard-first review deck for a batch of pull requests.
+A local, keyboard-first review docket for a batch of pull requests.
 
-An agent writes a session manifest: ordered groups of PRs, each with a one-line `why`. You run `prdeck` on it, a browser tab opens, and you work through every PR with Vim-style keys. Leave line notes, then approve, reject, or skip each PR. Each verdict moves you to the next unreviewed PR. When you finish, prdeck writes `verdicts.json` for the agent to act on.
+An agent (or you) puts PRs on the docket: a curated manifest of ordered groups, a list of PR numbers, a `gh pr list` query, or a local branch. A browser tab opens, and you work through every item with Vim-style keys. Leave notes, then approve, reject, or skip each one; each verdict moves you to the next undecided item. When you hand back, docket writes `verdicts.json`, prints a summary, and exits, so an agent running it in the background is notified.
 
-prdeck reads diffs from your local git checkout and metadata from `gh`. It never writes to GitHub.
+docket reads diffs from your local git checkout and metadata from `gh`. It never writes to GitHub.
 
 ## Usage
 
 ```sh
-bun install
-bun bin/prdeck.ts sessions/tui-cleanup.json
-# or, after `bun link`:
-prdeck sessions/tui-cleanup.json
+docket sessions/tui-cleanup.json          # curated manifest
+docket 52985 52988                        # PR numbers, in this order
+docket --author @me --state open          # anything gh pr list can filter
+docket my-branch                          # local branch against the base it most likely forked from
+docket v2..my-branch                      # explicit range (merge-base diff)
 ```
 
-| Option         | Description                                            |
-| -------------- | ------------------------------------------------------ |
-| `--port <n>`   | Port to listen on (default: any free port)             |
-| `--out <path>` | Verdicts path (default: `verdicts.json` next to the session) |
-| `--no-open`    | Print the URL without opening a browser                |
-| `--refresh`    | Ignore the cache and reload every PR                   |
+The repository is the current directory's checkout unless `--repo <path>` is given (a manifest uses its `repo.path`); the GitHub repo comes from the `origin` remote.
 
-Requirements: Bun, an authenticated `gh`, and a local clone of the repository at `repo.path`.
+| Option          | Description                                     |
+| --------------- | ----------------------------------------------- |
+| `--repo <path>` | Git checkout to use                             |
+| `--out <path>`  | Where to write `verdicts.json`                  |
+| `--port <n>`    | Port to listen on (default: any free port)      |
+| `--no-open`     | Print the URL without opening a browser         |
+| `--refresh`     | Ignore the PR cache                             |
 
-For each PR, prdeck runs `gh pr view` for metadata. It fetches `pull/N/head` and the base branch in a single `git fetch`, then diffs the PR head against its merge base with the base branch. If git fails, it falls back to `gh pr diff`. Results are cached under `~/.cache/prdeck`, so reopening a session is instant; a background refresh picks up new pushes.
+Install with `bun install && bun link`. Requirements: Bun, an authenticated `gh`, and a local clone.
 
-Review progress is saved continuously to `<session>.state.json` next to the session file. A reload or restart resumes where you left off.
+docket prints its URL immediately. It exits 0 when you hand back (`w` on the summary screen), printing one line per item and the verdicts path, or on Ctrl-C, printing `closed without hand-back` and the state path.
+
+For each PR, docket runs `gh pr view`, fetches `pull/N/head` and the base branches in one `git fetch`, and diffs the head against its merge base. If git fails it falls back to `gh pr diff`. PR data is cached under `~/.cache/docket`, so reopening is instant; a background refresh picks up new pushes.
+
+Progress is saved continuously, so a reload or restart resumes where you were. A manifest session keeps `<name>.state.json` and `verdicts.json` next to the manifest; ad-hoc sessions keep them, along with the generated `session.json`, in `~/.local/share/docket/<slug>/`.
 
 ## Keys
 
@@ -49,7 +55,7 @@ Review progress is saved continuously to `<session>.state.json` next to the sess
 | `z`                 | Toggle ignoring whitespace                 |
 | `O`                 | Open the PR on GitHub                      |
 | `Enter` or `:`      | Summary (`Enter` unfolds a folded file first) |
-| `w`                 | Write `verdicts.json` (on the summary screen) |
+| `w`                 | Hand back: write `verdicts.json` and exit (on the summary screen) |
 | `?`                 | Help                                       |
 
 In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels. Saving an empty note deletes it. The mouse works too: click a line to move the cursor there, hover the cursor line's number and click `+` to add a note, click a file header to fold it, and click a note to edit it.

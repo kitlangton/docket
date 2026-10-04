@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
-import type { Manifest, PrLoad, PrReview, ReviewState, Verdict } from "../src/types"
+import { itemId, itemLabel, type ItemLoad, type Manifest, type PrReview, type ReviewState, type Verdict } from "../src/types"
 import { countVerdicts, displayTitle, noteCount, type Entry } from "./model"
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
+const STATE_LABEL = { OPEN: "Open", MERGED: "Merged", CLOSED: "Closed", LOCAL: "Local" }
 const VERDICT_GLYPH: Record<Verdict, string> = { approve: "✓", reject: "✕", skip: "–" }
 
 export function Glyph(props: { verdict: Verdict | null | undefined }) {
@@ -21,10 +22,10 @@ export function VerdictLabel(props: { verdict: Verdict | null | undefined }) {
 
 export function Rail(props: {
   manifest: Manifest
-  prs: Record<string, PrLoad>
+  items: Record<string, ItemLoad>
   state: ReviewState
-  current: number
-  onSelect: (number: number) => void
+  current: string
+  onSelect: (id: string) => void
 }) {
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -42,22 +43,23 @@ export function Rail(props: {
             </div>
           ) : null}
           {group.prs.map((pr) => {
-            const load = props.prs[pr.number]
-            const review = props.state.reviews[pr.number]
+            const id = itemId(pr)
+            const load = props.items[id]
+            const review = props.state.reviews[id]
             const notes = noteCount(review)
             const title = load?.ok ? displayTitle(load.data.meta.title) : load ? "Failed to load" : "Loading…"
             return (
               <button
-                key={pr.number}
-                className={`rail-pr${pr.number === props.current ? " is-current" : ""}${review?.verdict ? " is-done" : ""}`}
+                key={id}
+                className={`rail-pr${id === props.current ? " is-current" : ""}${review?.verdict ? " is-done" : ""}`}
                 title={pr.after?.length ? `${title}\nAfter ${pr.after.map((n) => `#${n}`).join(", ")}` : title}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => props.onSelect(pr.number)}
+                onClick={() => props.onSelect(id)}
               >
                 <Glyph verdict={review?.verdict} />
                 <span className="rail-pr-title">{title}</span>
                 {notes ? <span className="rail-notes">{notes}</span> : null}
-                <span className="rail-num">{pr.number}</span>
+                <span className="rail-num">{pr.number ?? ""}</span>
               </button>
             )
           })}
@@ -67,10 +69,11 @@ export function Rail(props: {
   )
 }
 
-export function PrHeader(props: { entry: Entry; load: PrLoad | undefined; review: PrReview | undefined; state: ReviewState; total: number }) {
+export function PrHeader(props: { entry: Entry; load: ItemLoad | undefined; review: PrReview | undefined; state: ReviewState; total: number }) {
   const meta = props.load?.ok ? props.load.data.meta : undefined
   const stats = meta
     ? [
+        meta.commits ? `${meta.commits} commit${meta.commits === 1 ? "" : "s"}` : null,
         `${meta.changedFiles} file${meta.changedFiles === 1 ? "" : "s"}`,
         meta.additions ? `+${meta.additions}` : null,
         meta.deletions ? `−${meta.deletions}` : null,
@@ -85,18 +88,18 @@ export function PrHeader(props: { entry: Entry; load: PrLoad | undefined; review
           {props.entry.index + 1} of {props.total}
         </span>
         <span className="dot-sep">·</span>
-        <span>#{props.entry.pr.number}</span>
-        {meta && meta.state !== "OPEN" ? <span className="pr-state">{meta.state === "MERGED" ? "Merged" : "Closed"}</span> : null}
+        <span>{itemLabel(props.entry.pr)}</span>
+        {meta && meta.state !== "OPEN" ? <span className="pr-state">{STATE_LABEL[meta.state]}</span> : null}
         <span className="spacer" />
         {props.review?.verdict ? <VerdictLabel verdict={props.review.verdict} /> : null}
-        {meta ? (
+        {meta?.url ? (
           <a href={meta.url} target="_blank" rel="noreferrer">
             GitHub ↗
           </a>
         ) : null}
       </div>
       <h1>{meta ? displayTitle(meta.title) : "Loading…"}</h1>
-      <p className="pr-why">{props.entry.pr.why}</p>
+      {props.entry.pr.why ? <p className="pr-why">{props.entry.pr.why}</p> : null}
       <div className="pr-stats">
         {stats.join(" · ")}
         {props.entry.pr.after?.map((number) => (
@@ -112,17 +115,19 @@ export function PrHeader(props: { entry: Entry; load: PrLoad | undefined; review
           {props.review.reason}
         </p>
       ) : null}
-      {props.review?.prNote ? (
-        <p className="pr-aside">
-          <span className="pr-aside-label">Note</span>
-          {props.review.prNote}
-        </p>
-      ) : null}
+      {props.review?.notes
+        .filter((note) => !note.path)
+        .map((note) => (
+          <p className="pr-aside" key={note.id}>
+            <span className="pr-aside-label">Note</span>
+            {note.body}
+          </p>
+        ))}
     </header>
   )
 }
 
-export function StatusBar(props: { order: number[]; state: ReviewState; mode: string; position: string }) {
+export function StatusBar(props: { order: string[]; state: ReviewState; mode: string; position: string }) {
   const counts = countVerdicts(props.order, props.state)
   const reviewed = props.order.length - counts.unreviewed
   return (
@@ -244,14 +249,13 @@ export function Prompt(props: {
 export function Summary(props: {
   manifest: Manifest
   entries: Entry[]
-  prs: Record<string, PrLoad>
+  items: Record<string, ItemLoad>
   state: ReviewState
   selected: number
   outPath: string
-  written: string | null
-  onOpen: (number: number) => void
+  onOpen: (id: string) => void
 }) {
-  const order = props.entries.map((entry) => entry.pr.number)
+  const order = props.entries.map((entry) => entry.id)
   const counts = countVerdicts(order, props.state)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -272,35 +276,28 @@ export function Summary(props: {
           <span>{counts.unreviewed} unreviewed</span>
         </p>
         <p className="summary-write">
-          {props.written ? (
-            <span className="written">Written at {props.written} to {props.outPath}</span>
-          ) : (
-            <>
-              <kbd>w</kbd> writes verdicts to <span className="mono">{props.outPath}</span>
-            </>
-          )}
+          <kbd>w</kbd> hands back: writes <span className="mono">{props.outPath}</span> and closes docket
         </p>
         <div className="summary-list">
           {props.entries.map((entry, index) => {
-            const load = props.prs[entry.pr.number]
-            const review = props.state.reviews[entry.pr.number]
+            const load = props.items[entry.id]
+            const review = props.state.reviews[entry.id]
             return (
               <div
-                key={entry.pr.number}
+                key={entry.id}
                 className={`summary-row${index === props.selected ? " is-selected" : ""}`}
-                onClick={() => props.onOpen(entry.pr.number)}
+                onClick={() => props.onOpen(entry.id)}
               >
                 <div className="summary-head">
                   <Glyph verdict={review?.verdict} />
                   <span className="summary-pr-title">{load?.ok ? displayTitle(load.data.meta.title) : ""}</span>
-                  <span className="rail-num">{entry.pr.number}</span>
+                  <span className="rail-num">{itemLabel(entry.pr)}</span>
                 </div>
                 {review?.reason ? <div className="summary-detail">{review.reason}</div> : null}
-                {review?.prNote ? <div className="summary-detail">{review.prNote}</div> : null}
                 {review?.notes.map((note) => (
                   <div key={note.id} className="summary-detail">
                     <span className="loc">
-                      {note.path.split("/").at(-1)}:{note.line}
+                      {note.path ? `${note.path.split("/").at(-1)}:${note.line}` : "PR"}
                     </span>
                     {note.body}
                   </div>

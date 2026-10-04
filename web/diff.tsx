@@ -77,9 +77,11 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
   )
 
   const annotations = useMemo(() => {
-    const notes: DiffLineAnnotation<AnnotationMeta>[] = props.notes
-      .filter((note) => note.id !== props.draft?.noteId)
-      .map((note) => ({ side: note.side, lineNumber: note.line, metadata: { kind: "note", note } }))
+    const notes: DiffLineAnnotation<AnnotationMeta>[] = props.notes.flatMap((note) =>
+      note.id === props.draft?.noteId || !note.side || note.line === undefined
+        ? []
+        : [{ side: note.side, lineNumber: note.line, metadata: { kind: "note" as const, note } }],
+    )
     if (!props.draft) return notes
     const draft = props.draft
     return [...notes, { side: draft.side, lineNumber: draft.line, metadata: { kind: "draft" as const, draft } }]

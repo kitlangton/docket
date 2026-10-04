@@ -1,15 +1,17 @@
 import { parsePatchFiles, type FileDiffMetadata, type SelectedLineRange } from "@pierre/diffs"
-import type { Manifest, ManifestGroup, ManifestPr, PrReview, ReviewState, Side, Verdict } from "../src/types"
+import { itemId, type Manifest, type ManifestGroup, type ManifestItem, type PrReview, type ReviewState, type Side, type Verdict } from "../src/types"
 
 export type Row = { file: number; side: Side; line: number; kind: "context" | "add" | "del"; block: number | null }
 export type Block = { file: number; first: number; last: number; range: SelectedLineRange }
 export type PrModel = { files: FileDiffMetadata[]; focus: Set<string>; rows: Row[]; blocks: Block[] }
-export type Entry = { pr: ManifestPr; group: ManifestGroup; index: number }
+export type Entry = { id: string; pr: ManifestItem; group: ManifestGroup; index: number }
 
 export const EMPTY_REVIEW: PrReview = { verdict: null, notes: [] }
 
 export function entries(manifest: Manifest) {
-  return manifest.groups.flatMap((group) => group.prs.map((pr) => ({ pr, group }))).map((entry, index) => ({ ...entry, index }))
+  return manifest.groups
+    .flatMap((group) => group.prs.map((pr) => ({ id: itemId(pr), pr, group })))
+    .map((entry, index) => ({ ...entry, index }))
 }
 
 export function buildModel(patch: string, key: string, focusPaths: string[] = []): PrModel {
@@ -54,19 +56,19 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
   return { files, focus, rows, blocks }
 }
 
-export function nextUnreviewed(order: number[], state: ReviewState, from: number) {
+export function nextUnreviewed(order: string[], state: ReviewState, from: string) {
   const index = order.indexOf(from)
   const rotated = [...order.slice(index + 1), ...order.slice(0, index)]
-  return rotated.find((number) => !state.reviews[number]?.verdict)
+  return rotated.find((id) => !state.reviews[id]?.verdict)
 }
 
 export function noteCount(review: PrReview | undefined) {
   if (!review) return 0
-  return review.notes.length + (review.prNote ? 1 : 0)
+  return review.notes.length
 }
 
-export function countVerdicts(order: number[], state: ReviewState) {
-  const verdicts = order.map((number) => state.reviews[number]?.verdict ?? null)
+export function countVerdicts(order: string[], state: ReviewState) {
+  const verdicts = order.map((id) => state.reviews[id]?.verdict ?? null)
   const count = (verdict: Verdict | null) => verdicts.filter((value) => value === verdict).length
   return { approve: count("approve"), reject: count("reject"), skip: count("skip"), unreviewed: count(null) }
 }

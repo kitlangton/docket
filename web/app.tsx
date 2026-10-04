@@ -31,7 +31,7 @@ export function App() {
     return () => clearInterval(timer)
   }, [])
 
-  if (!session || !state) return <div className="splash">prdeck</div>
+  if (!session || !state) return <div className="splash">docket</div>
   const ready = session.progress.done >= session.progress.total || session.progress.phase === "Ready"
   if (!ready) return <Loading session={session} />
   return <Deck session={session} initial={state} />
@@ -63,39 +63,39 @@ const HEADER = -1
 function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const session = props.session
   const entries = useMemo(() => toEntries(session.manifest), [session.manifest])
-  const order = useMemo(() => entries.map((entry) => entry.pr.number), [entries])
+  const order = useMemo(() => entries.map((entry) => entry.id), [entries])
   const [state, setState] = useState<ReviewState>(() => ({
     ...props.initial,
     current: props.initial.current && order.includes(props.initial.current) ? props.initial.current : order[0]!,
   }))
   const current = state.current ?? order[0]!
   const [view, setView] = useState<"deck" | "summary">("deck")
-  const [cursors, setCursors] = useState<Record<number, number>>({})
+  const [cursors, setCursors] = useState<Record<string, number>>({})
   const [cursorMode, setCursorMode] = useState<"block" | "line">("block")
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">(
-    () => (localStorage.getItem("prdeck.diffStyle") === "unified" ? "unified" : "split"),
+    () => (localStorage.getItem("docket.diffStyle") === "unified" ? "unified" : "split"),
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [help, setHelp] = useState(false)
   const [prompt, setPrompt] = useState<PromptKind | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [summaryIndex, setSummaryIndex] = useState(0)
-  const [written, setWritten] = useState<string | null>(null)
+  const [handedBack, setHandedBack] = useState<string | null>(null)
   const [folds, setFolds] = useState<Record<string, boolean>>({})
   const mainRef = useRef<HTMLDivElement>(null)
   const scrollIntent = useRef<ScrollIntent>("top")
   const pendingG = useRef(0)
 
   const models = useMemo(() => {
-    const result = new Map<number, PrModel>()
+    const result = new Map<string, PrModel>()
     entries.forEach((entry) => {
-      const load = session.prs[entry.pr.number]
+      const load = session.items[entry.id]
       if (!load?.ok) return
       const patch = ignoreWhitespace ? load.data.patchIgnoreWhitespace : load.data.patch
-      result.set(entry.pr.number, buildModel(patch, `${entry.pr.number}-${load.data.meta.headRefOid}-${ignoreWhitespace ? "w" : ""}`, entry.pr.focus))
+      result.set(entry.id, buildModel(patch, `${entry.id}-${load.data.meta.headRefOid}-${ignoreWhitespace ? "w" : ""}`, entry.pr.focus))
     })
     return result
-  }, [entries, session.prs, ignoreWhitespace])
+  }, [entries, session.items, ignoreWhitespace])
 
   const entry = entries[order.indexOf(current)]!
   const model = models.get(current)
@@ -112,6 +112,11 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     (block, index, blocks) => !isCollapsed(block.file) || blocks.findIndex((b) => b.file === block.file) === index,
   )
 
+  const reviewedCount = order.filter((id) => state.reviews[id]?.verdict).length
+  useEffect(() => {
+    document.title = `docket · ${reviewedCount}/${order.length}`
+  }, [reviewedCount, order.length])
+
   // Persist review state shortly after each change.
   const firstSave = useRef(true)
   useEffect(() => {
@@ -125,16 +130,16 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     return () => clearTimeout(timer)
   }, [state])
 
-  const updateReview = useCallback((number: number, fn: (review: PrReview) => PrReview) => {
-    setState((prev) => ({ ...prev, reviews: { ...prev.reviews, [number]: fn(prev.reviews[number] ?? EMPTY_REVIEW) } }))
+  const updateReview = useCallback((id: string, fn: (review: PrReview) => PrReview) => {
+    setState((prev) => ({ ...prev, reviews: { ...prev.reviews, [id]: fn(prev.reviews[id] ?? EMPTY_REVIEW) } }))
   }, [])
 
-  const goTo = useCallback((number: number) => {
+  const goTo = useCallback((id: string) => {
     scrollIntent.current = "top"
     setDraft(null)
     setCursorMode("block")
-    setCursors((prev) => ({ ...prev, [number]: HEADER }))
-    setState((prev) => ({ ...prev, current: number }))
+    setCursors((prev) => ({ ...prev, [id]: HEADER }))
+    setState((prev) => ({ ...prev, current: id }))
   }, [])
 
   const moveCursor = useCallback(
@@ -195,7 +200,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   )
 
   const cancelDraft = useCallback(() => setDraft(null), [])
-  const editNote = useCallback((note: Note) => setDraft({ ...note, noteId: note.id }), [])
+  const editNote = useCallback((note: Note) => {
+    if (!note.path || !note.side || note.line === undefined) return
+    setDraft({ path: note.path, side: note.side, line: note.line, body: note.body, noteId: note.id })
+  }, [])
   const clickLine = useCallback(
     (file: number, side: Side, line: number) => {
       const index = model?.rows.findIndex((row) => row.file === file && row.side === side && row.line === line) ?? -1
@@ -204,9 +212,10 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     [model, moveCursor],
   )
 
-  const writeVerdicts = async () => {
-    await fetch("/api/verdicts", { method: "POST", body: JSON.stringify(state) })
-    setWritten(`${new Date().toLocaleTimeString()}`)
+  const handBack = async () => {
+    const res = await fetch("/api/handback", { method: "POST", body: JSON.stringify(state) })
+    const body: { path: string } = await res.json()
+    setHandedBack(body.path)
   }
 
   // Scroll the cursor into place after it moves or the PR changes.
@@ -270,7 +279,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         setView("deck")
         return true
       case "w":
-        writeVerdicts()
+        handBack()
         return true
       case "?":
         setHelp(true)
@@ -371,7 +380,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         return true
       case "v": {
         const next = diffStyle === "split" ? "unified" : "split"
-        localStorage.setItem("prdeck.diffStyle", next)
+        localStorage.setItem("docket.diffStyle", next)
         scrollIntent.current = "top"
         setDiffStyle(next)
         return true
@@ -385,7 +394,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         if (cursor && model) toggleFold(model.files[cursor.file]!.name)
         return true
       case "O": {
-        const load = session.prs[current]
+        const load = session.items[current]
         if (load?.ok) window.open(load.data.meta.url, "_blank")
         return true
       }
@@ -411,7 +420,9 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
 
   const notesByFile = useMemo(() => {
     const map = new Map<string, Note[]>()
-    review?.notes.forEach((note) => map.set(note.path, [...(map.get(note.path) ?? []), note]))
+    review?.notes.forEach((note) => {
+      if (note.path) map.set(note.path, [...(map.get(note.path) ?? []), note])
+    })
     return map
   }, [review?.notes])
 
@@ -422,26 +433,27 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     return { start: cursor.line, end: cursor.line, side: cursor.side }
   }
 
-  const load = session.prs[current]
+  const load = session.items[current]
   const position = cursor && model ? `${model.files[cursor.file]?.name.split("/").at(-1)}:${cursor.side === "deletions" ? "L" : "R"}${cursor.line}` : ""
+
+  if (handedBack) return <HandedBack path={handedBack} />
 
   return (
     <div className="app">
-      <Rail manifest={session.manifest} prs={session.prs} state={state} current={current} onSelect={(number) => {
+      <Rail manifest={session.manifest} items={session.items} state={state} current={current} onSelect={(id) => {
         setView("deck")
-        goTo(number)
+        goTo(id)
       }} />
       {view === "summary" ? (
         <Summary
           manifest={session.manifest}
           entries={entries}
-          prs={session.prs}
+          items={session.items}
           state={state}
           selected={summaryIndex}
           outPath={session.outPath}
-          written={written}
-          onOpen={(number) => {
-            goTo(number)
+          onOpen={(id) => {
+            goTo(id)
             setView("deck")
           }}
         />
@@ -498,12 +510,12 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         <Prompt
           title={`Note on #${current}`}
           placeholder="PR-level note"
-          initial={review?.prNote ?? ""}
+          initial=""
           multiline
           onCancel={() => setPrompt(null)}
           onSubmit={(value) => {
             setPrompt(null)
-            updateReview(current, (prev) => ({ ...prev, prNote: value || undefined }))
+            if (value) updateReview(current, (prev) => ({ ...prev, notes: [...prev.notes, { id: crypto.randomUUID(), body: value }] }))
           }}
         />
       ) : null}
@@ -512,6 +524,17 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
 }
 
 const NO_NOTES: Note[] = []
+
+function HandedBack(props: { path: string }) {
+  return (
+    <div className="splash">
+      <div className="handed-back">
+        <div className="handed-back-title">Handed back</div>
+        <p>Verdicts are in {props.path}. You can close this tab.</p>
+      </div>
+    </div>
+  )
+}
 
 function rowElement(main: HTMLElement, row: Row) {
   const section = main.querySelector<HTMLElement>(`[data-file-index="${row.file}"]`)

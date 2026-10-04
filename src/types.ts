@@ -1,6 +1,9 @@
-export type ManifestPr = {
-  number: number
-  why: string
+export type ManifestItem = {
+  /** GitHub pull request number. */
+  number?: number
+  /** Local git ref or `base..head` range, for work that is not on GitHub. */
+  ref?: string
+  why?: string
   after?: number[]
   focus?: string[]
 }
@@ -8,60 +11,68 @@ export type ManifestPr = {
 export type ManifestGroup = {
   title: string
   why?: string
-  prs: ManifestPr[]
+  prs: ManifestItem[]
 }
 
 export type Manifest = {
   title: string
   summary?: string
-  repo: { path: string; github: string; base: string }
+  repo: { path: string; github?: string; base?: string }
   groups: ManifestGroup[]
 }
 
-export type PrMeta = {
-  number: number
+export type ItemState = "OPEN" | "MERGED" | "CLOSED" | "LOCAL"
+
+export type ItemMeta = {
+  id: string
+  number?: number
+  ref?: string
   title: string
   body: string
   headRefName: string
   headRefOid: string
   baseRefName: string
-  url: string
-  state: "OPEN" | "MERGED" | "CLOSED"
+  url?: string
+  state: ItemState
   additions: number
   deletions: number
   changedFiles: number
+  commits?: number
 }
 
-export type PrData = {
-  meta: PrMeta
+export type ItemData = {
+  meta: ItemMeta
   patch: string
   patchIgnoreWhitespace: string
   source: "git" | "gh"
 }
 
-export type PrLoad = { ok: true; data: PrData } | { ok: false; number: number; error: string }
+export type ItemLoad = { ok: true; data: ItemData } | { ok: false; id: string; error: string }
 
 export type Verdict = "approve" | "reject" | "skip"
 
 export type Side = "additions" | "deletions"
 
+/** A note on the whole PR has no `path`; a line note has `path`, `side`, and `line`; a range note adds `startLine`. */
 export type Note = {
   id: string
-  path: string
-  side: Side
-  line: number
   body: string
+  path?: string
+  side?: Side
+  startLine?: number
+  line?: number
 }
 
 export type PrReview = {
   verdict: Verdict | null
   reason?: string
   notes: Note[]
-  prNote?: string
+  viewed?: string[]
 }
 
 export type ReviewState = {
-  current: number | null
+  version: 2
+  current: string | null
   reviews: Record<string, PrReview>
 }
 
@@ -69,21 +80,37 @@ export type Progress = { done: number; total: number; phase: string }
 
 export type SessionPayload = {
   manifest: Manifest
-  sessionPath: string
+  label: string
+  statePath: string
   outPath: string
   progress: Progress
   version: number
-  prs: Record<string, PrLoad>
+  items: Record<string, ItemLoad>
 }
+
+export type VerdictNote =
+  | { body: string }
+  | { path: string; side: "LEFT" | "RIGHT"; startLine?: number; line: number; body: string }
 
 export type VerdictsFile = {
   session: string
   reviewedAt: string
   prs: {
-    number: number
+    number?: number
+    ref?: string
+    title?: string
     verdict: Verdict | null
     reason?: string
-    notes: { path: string; side: "LEFT" | "RIGHT"; line: number; body: string }[]
-    prNote?: string
+    notes: VerdictNote[]
   }[]
+}
+
+export function itemId(item: ManifestItem) {
+  if (item.number !== undefined) return String(item.number)
+  return `ref:${item.ref}`
+}
+
+export function itemLabel(item: ManifestItem) {
+  if (item.number !== undefined) return `#${item.number}`
+  return item.ref ?? ""
 }
