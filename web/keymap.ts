@@ -3,8 +3,8 @@
  * (`bun run keys` regenerates it), so the three cannot drift.
  */
 
-export type Mode = "normal" | "visual" | "note" | "summary"
-export type Group = "Navigate" | "Review" | "Folds" | "Commands"
+export type Mode = "normal" | "visual" | "note" | "summary" | "home"
+export type Group = "Navigate" | "Review" | "Folds" | "Commands" | "Inbox"
 
 export type Action =
   | "changeNext"
@@ -64,6 +64,11 @@ export type Action =
   | "summaryOpen"
   | "summaryBack"
   | "handBack"
+  | "goHome"
+  | "homeNext"
+  | "homePrev"
+  | "homeOpen"
+  | "homeArchive"
 
 export type Binding = {
   /** Alternative key sequences; keys within a sequence are space-separated, e.g. "g g", "C-d", "] c". */
@@ -132,7 +137,7 @@ export const KEYMAP: Binding[] = [
   { keys: ["t"], action: "splitToggle", label: "Split / unified", group: "Commands" },
   { keys: ["z w"], action: "whitespaceToggle", label: "Ignore whitespace", group: "Commands" },
   { keys: ["O"], action: "openGithub", label: "Open on GitHub", group: "Commands" },
-  { keys: ["?"], action: "help", label: "Toggle this help", group: "Commands", modes: ["normal", "visual", "note", "summary"] },
+  { keys: ["?"], action: "help", label: "Toggle this help", group: "Commands", modes: ["normal", "visual", "note", "summary", "home"] },
   { keys: ["Escape"], action: "cancel", label: "Cancel pending key or selection", group: "Commands", modes: ["normal", "note"] },
 
   { keys: ["j", "ArrowDown"], action: "summaryNext", label: "Next PR", group: "Commands", modes: ["summary"], hidden: true },
@@ -140,9 +145,15 @@ export const KEYMAP: Binding[] = [
   { keys: ["Enter"], action: "summaryOpen", label: "Open PR", group: "Commands", modes: ["summary"], hidden: true },
   { keys: ["Escape", "q"], action: "summaryBack", label: "Back to the PR", group: "Commands", modes: ["summary"], hidden: true },
   { keys: ["w"], action: "handBack", label: "Hand back", group: "Commands", modes: ["summary"] },
+
+  { keys: ["g h"], action: "goHome", label: "Go to the inbox", group: "Inbox", modes: ["normal", "summary"] },
+  { keys: ["j", "ArrowDown"], action: "homeNext", label: "Next session", group: "Inbox", modes: ["home"] },
+  { keys: ["k", "ArrowUp"], action: "homePrev", label: "Previous session", group: "Inbox", modes: ["home"] },
+  { keys: ["Enter", "o"], action: "homeOpen", label: "Open session", group: "Inbox", modes: ["home"] },
+  { keys: ["d"], action: "homeArchive", label: "Archive a session that isn't waiting", group: "Inbox", modes: ["home"] },
 ]
 
-export const GROUPS: Group[] = ["Navigate", "Review", "Folds", "Commands"]
+export const GROUPS: Group[] = ["Navigate", "Review", "Folds", "Commands", "Inbox"]
 
 // An ambiguous prefix (`]` before `] c`) waits this long before running the shorter binding.
 export const SEQUENCE_TIMEOUT = 400

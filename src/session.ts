@@ -14,6 +14,8 @@ export type SessionArgs = {
 }
 
 export type Session = {
+  /** Stable id: registering the same session again attaches to it. */
+  id: string
   manifest: Manifest
   /** Path of the manifest on disk; ad-hoc sessions write a generated one. */
   manifestPath: string
@@ -28,11 +30,13 @@ export async function resolveSession(args: SessionArgs): Promise<Session> {
   const github = await originRepo(repoPath)
   const repo = { path: repoPath, github }
   const adhoc = await adhocManifest(args, repo)
-  const dir = join(dataHome(), slug([basename(repoPath), ...adhocKey(args)]))
+  const id = slug([basename(repoPath), ...adhocKey(args)])
+  const dir = join(dataHome(), id)
   await mkdir(dir, { recursive: true })
   const manifestPath = join(dir, "session.json")
   await Bun.write(manifestPath, JSON.stringify(adhoc, null, 2) + "\n")
   return {
+    id,
     manifest: adhoc,
     manifestPath,
     statePath: join(dir, "session.state.json"),
@@ -47,6 +51,7 @@ async function fromManifest(path: string, args: SessionArgs): Promise<Session> {
   const repoPath = await repoRoot(args.repo ?? manifest.repo.path)
   const github = manifest.repo.github ?? (await originRepo(repoPath))
   return {
+    id: `${slug([basename(path, ".json")])}-${Bun.hash(path).toString(36).slice(0, 6)}`,
     manifest: { ...manifest, repo: { ...manifest.repo, path: repoPath, github } },
     manifestPath: path,
     statePath: join(dirname(path), `${basename(path, ".json")}.state.json`),
@@ -124,7 +129,7 @@ function slug(parts: string[]) {
   return `${text.slice(0, 52)}-${Bun.hash(text).toString(36).slice(0, 8)}`
 }
 
-function dataHome() {
+export function dataHome() {
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "docket")
 }
 

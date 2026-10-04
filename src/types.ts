@@ -97,6 +97,7 @@ export type ReviewState = {
 export type Progress = { done: number; total: number; phase: string }
 
 export type SessionPayload = {
+  id: string
   manifest: Manifest
   label: string
   statePath: string
@@ -132,3 +133,30 @@ export function itemLabel(item: ManifestItem) {
   if (item.number !== undefined) return `#${item.number}`
   return item.ref ?? ""
 }
+
+export type SessionStatus = "waiting" | "progress" | "done"
+
+/** One row of the home inbox. */
+export type InboxEntry = {
+  id: string
+  title: string
+  repo: string
+  cwd?: string
+  agent?: string
+  status: SessionStatus
+  total: number
+  reviewed: number
+  notes: number
+  counts: { approve: number; reject: number; skip: number; unreviewed: number }
+  registeredAt: string
+  updatedAt: string
+  handedBackAt?: string
+}
+
+/** Server events on /api/events, shared by tabs. */
+export type ServerEvent =
+  | { type: "hello"; version: string }
+  | { type: "inbox" }
+  | { type: "session"; id: string; version: number }
+  | { type: "navigate"; id: string }
+  | { type: "restart" }

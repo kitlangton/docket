@@ -1,6 +1,16 @@
 import type { SelectedLineRange } from "@pierre/diffs"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { itemLabel, type Note, type PrReview, type ReviewState, type SessionPayload, type Side, type Verdict } from "../src/types"
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
+import {
+  itemLabel,
+  type Note,
+  type PrReview,
+  type ReviewState,
+  type ServerEvent,
+  type SessionPayload,
+  type Side,
+  type Verdict,
+} from "../src/types"
+import { Home } from "./home"
 import { FileBlock, type Draft } from "./diff"
 import { rowElement } from "./dom"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
@@ -20,31 +30,114 @@ import {
   VerdictPrompt,
 } from "./views"
 
-export function App() {
-  const [session, setSession] = useState<SessionPayload>()
-  const [state, setState] = useState<ReviewState>()
+type Route = { kind: "home" } | { kind: "session"; id: string }
 
-  useEffect(() => {
-    const load = () =>
-      fetch("/api/session")
-        .then((res) => res.json())
-        .then((payload: SessionPayload) => setSession(payload))
-    load()
-    fetch("/api/state")
-      .then((res) => res.json())
-      .then((value: ReviewState) => setState(value))
-    const seen = { version: -1 }
-    const timer = setInterval(async () => {
-      const status: { version: number } = await fetch("/api/version").then((res) => res.json())
-      if (status.version === seen.version) return
-      seen.version = status.version
-      load()
-    }, 700)
-    return () => clearInterval(timer)
+function routeOf(path: string): Route {
+  const match = path.match(/^\/s\/([^/]+)/)
+  return match ? { kind: "session", id: decodeURIComponent(match[1]!) } : { kind: "home" }
+}
+
+// One id per browser tab, so the server can find this tab again (to focus a session in it) across reloads.
+const TAB_ID = sessionStorage.getItem("docket.tab") ?? crypto.randomUUID()
+sessionStorage.setItem("docket.tab", TAB_ID)
+
+/** Routes between the inbox and sessions client-side, and holds the one event stream from the server. */
+export function App() {
+  const [route, setRoute] = useState<Route>(() => routeOf(location.pathname))
+  const [inboxTick, setInboxTick] = useState(0)
+  const [sessionTicks, setSessionTicks] = useState<Record<string, number>>({})
+  const flush = useRef<() => void>(() => {})
+
+  const navigate = useCallback((path: string) => {
+    if (location.pathname !== path) history.pushState(null, "", path)
+    setRoute(routeOf(path))
+    fetch(`/api/tabs/${TAB_ID}`, { method: "POST", body: JSON.stringify({ at: path }) })
   }, [])
 
+  useEffect(() => {
+    const onPop = () => {
+      setRoute(routeOf(location.pathname))
+      fetch(`/api/tabs/${TAB_ID}`, { method: "POST", body: JSON.stringify({ at: location.pathname }) })
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
+
+  useEffect(() => {
+    const seen: { version?: string } = {}
+    const connect = () => new EventSource(`/api/events?tab=${TAB_ID}&at=${encodeURIComponent(location.pathname)}`)
+    const source = { current: connect() }
+    const onMessage = (message: MessageEvent<string>) => {
+      const event: ServerEvent = JSON.parse(message.data)
+      if (event.type === "hello") {
+        // A restarted server running newer code means this page is stale.
+        if (seen.version && seen.version !== event.version) location.reload()
+        seen.version = event.version
+        setInboxTick((tick) => tick + 1)
+        return
+      }
+      if (event.type === "inbox") return setInboxTick((tick) => tick + 1)
+      if (event.type === "session") return setSessionTicks((ticks) => ({ ...ticks, [event.id]: event.version }))
+      if (event.type === "navigate") {
+        navigate(`/s/${encodeURIComponent(event.id)}`)
+        window.focus()
+        return
+      }
+      if (event.type === "restart") flush.current()
+    }
+    source.current.onmessage = onMessage
+    // EventSource retries on its own, but gives up for good on some failures; reconnect those by hand.
+    const timer = setInterval(() => {
+      if (source.current.readyState !== EventSource.CLOSED) return
+      source.current = connect()
+      source.current.onmessage = onMessage
+    }, 1000)
+    return () => {
+      clearInterval(timer)
+      source.current.close()
+    }
+  }, [navigate])
+
+  if (route.kind === "home") return <Home tick={inboxTick} onOpen={(id) => navigate(`/s/${encodeURIComponent(id)}`)} />
+  return <SessionView key={route.id} id={route.id} tick={sessionTicks[route.id] ?? 0} flush={flush} onHome={() => navigate("/")} />
+}
+
+function SessionView(props: { id: string; tick: number; flush: RefObject<() => void>; onHome: () => void }) {
+  const [session, setSession] = useState<SessionPayload>()
+  const [state, setState] = useState<ReviewState>()
+  const [missing, setMissing] = useState(false)
+  const base = `/api/s/${encodeURIComponent(props.id)}`
+
+  useEffect(() => {
+    fetch(`${base}/state`).then(async (res) => {
+      if (!res.ok) return setMissing(true)
+      setState(await res.json())
+    })
+  }, [base])
+  useEffect(() => {
+    fetch(`${base}/session`).then(async (res) => {
+      if (!res.ok) return setMissing(true)
+      setSession(await res.json())
+    })
+  }, [base, props.tick])
+
+  if (missing) return <MissingSession onHome={props.onHome} />
   if (!session || !state) return <div className="splash" />
-  return <Deck session={session} initial={state} />
+  return <Deck session={session} initial={state} base={base} flush={props.flush} onHome={props.onHome} />
+}
+
+function MissingSession(props: { onHome: () => void }) {
+  return (
+    <div className="splash view-enter">
+      <div className="handed-back">
+        <h1>No such session</h1>
+        <p className="muted">It may have been archived or never registered with this server.</p>
+        <button className="link-button" onClick={props.onHome}>
+          Back to inbox
+        </button>
+      </div>
+    </div>
+  )
 }
 
 type PromptState = { kind: "reject" } | { kind: "note"; noteId?: string; initial: string }
@@ -62,7 +155,7 @@ type Visual = { anchor: number; pill?: { x: number; y: number } }
 // Cursor position above the first change: the PR header, shown at scroll top.
 const HEADER = -1
 
-function Deck(props: { session: SessionPayload; initial: ReviewState }) {
+function Deck(props: { session: SessionPayload; initial: ReviewState; base: string; flush: RefObject<() => void>; onHome: () => void }) {
   const session = props.session
   const entries = useMemo(() => toEntries(session.manifest), [session.manifest])
   const order = useMemo(() => entries.map((entry) => entry.id), [entries])
@@ -96,7 +189,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [message, setMessage] = useState<{ text: string; at: number } | null>(null)
   const [bar, setBar] = useState<Bar | null>(null)
-  const [closed, setClosed] = useState(false)
   const jumpsRef = useRef<{ list: Position[]; index: number }>({ list: [], index: 0 })
   const undoRef = useRef<{ id: string; before: VerdictValue; after: VerdictValue }[]>([])
   const redoRef = useRef<typeof undoRef.current>([])
@@ -136,18 +228,31 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     document.title = `docket · ${reviewedCount}/${order.length}`
   }, [reviewedCount, order.length])
 
-  // Persist review state shortly after each change.
+  // Persist review state shortly after each change, and at once when leaving or when the server restarts.
+  const unsaved = useRef<ReviewState | null>(null)
+  const save = useCallback(() => {
+    const pending = unsaved.current
+    unsaved.current = null
+    if (pending) fetch(`${props.base}/state`, { method: "PUT", body: JSON.stringify(pending), keepalive: true })
+  }, [props.base])
   const firstSave = useRef(true)
   useEffect(() => {
     if (firstSave.current) {
       firstSave.current = false
       return
     }
-    const timer = setTimeout(() => {
-      fetch("/api/state", { method: "PUT", body: JSON.stringify(state) })
-    }, 250)
+    unsaved.current = state
+    const timer = setTimeout(save, 250)
     return () => clearTimeout(timer)
-  }, [state])
+  }, [state, save])
+  useEffect(() => {
+    props.flush.current = save
+    window.addEventListener("pagehide", save)
+    return () => {
+      window.removeEventListener("pagehide", save)
+      save()
+    }
+  }, [save, props.flush])
 
   useEffect(() => {
     const track = (event: PointerEvent) => {
@@ -343,7 +448,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   }, [current, view])
 
   const handBack = async () => {
-    const res = await fetch("/api/handback", { method: "POST", body: JSON.stringify(state) })
+    const res = await fetch(`${props.base}/handback`, { method: "POST", body: JSON.stringify(state) })
     const body: { path: string } = await res.json()
     setHandedBack(body.path)
   }
@@ -455,8 +560,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     if (command) say(`Not a command: ${command}`)
   }
   const closeWithoutHandBack = async () => {
-    await fetch("/api/close", { method: "POST", body: JSON.stringify(state) })
-    setClosed(true)
+    await fetch(`${props.base}/close`, { method: "POST", body: JSON.stringify(state) })
+    props.onHome()
   }
   const openSummary = () => {
     setSummaryIndex(order.indexOf(current))
@@ -587,13 +692,17 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
     if (!visual) return
     const rows = model?.rows ?? []
     const file = rows[visual.anchor]?.file
-    const target = Array.from({ length: count }).reduce<number>((at) => (rows[at + direction]?.file === file ? at + direction : at), cursorIndex)
+    const target = Array.from({ length: count }).reduce<number>(
+      (at) => (rows[at + direction]?.file === file ? at + direction : at),
+      cursorIndex,
+    )
     moveCursor(target, "visible", "line")
     setVisual({ anchor: visual.anchor })
   }
 
   // Each action returns false when it does not apply here, so the next mode can handle the key.
-  const actions: Record<Action, (count: number | undefined) => boolean | void> = {
+  const actions: Partial<Record<Action, (count: number | undefined) => boolean | void>> = {
+    goHome: () => props.onHome(),
     changeNext: (count) => changeStep(1, count ?? 1),
     changePrev: (count) => changeStep(-1, count ?? 1),
     lineNext: (count) => moveCursor(Math.min((model?.rows.length ?? 1) - 1, cursorIndex + (count ?? 1)), "visible", "line"),
@@ -716,7 +825,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   /** Runs a binding; if its action declines, the key is offered to the remaining modes. */
   const run = (binding: Binding, mode: Mode, count: number | undefined, key: string, modes: Mode[]): boolean => {
     if (visual && mode === "normal") setVisual(null)
-    if (actions[binding.action](count) !== false) return true
+    const action = actions[binding.action]
+    if (action && action(count) !== false) return true
     const rest = modes.slice(modes.indexOf(mode) + 1)
     if (!rest.length) return false
     const retry = feed({ count: count === undefined ? "" : String(count), keys: [] }, key, rest)
@@ -741,7 +851,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       const target = event.target
       if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) return
       if (event.metaKey || event.altKey) return
-      if (prompt || draft || palette || bar || closed) return
+      if (prompt || draft || palette || bar) return
       const key = keyName(event)
       if (["Shift", "Control", "Alt", "Meta"].includes(key)) return
       clearTimeout(pendingTimer.current)
@@ -777,7 +887,6 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   const runLatest = useRef(run)
   runLatest.current = run
 
-
   const notesByFile = useMemo(() => {
     const map = new Map<string, Note[]>()
     review?.notes.forEach((note) => {
@@ -803,8 +912,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
       ? `${model.files[cursor.file]?.name.split("/").at(-1)}:${cursor.side === "deletions" ? "L" : "R"}${cursor.line}`
       : ""
 
-  if (handedBack) return <HandedBack path={handedBack} state={state} order={order} />
-  if (closed) return <ClosedScreen />
+  if (handedBack) return <HandedBack path={handedBack} state={state} order={order} onHome={props.onHome} />
 
   return (
     <div className="app">
@@ -814,6 +922,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         state={state}
         current={current}
         stamped={stamped}
+        onHome={props.onHome}
         onSelect={(id) => {
           setView("deck")
           switchPr(id)
@@ -914,7 +1023,13 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
         </button>
       ) : null}
       {bar?.kind === "command" ? (
-        <CommandBar prefix=":" value={bar.text} onChange={(text) => setBar({ kind: "command", text })} onSubmit={runCommand} onCancel={closeBar} />
+        <CommandBar
+          prefix=":"
+          value={bar.text}
+          onChange={(text) => setBar({ kind: "command", text })}
+          onSubmit={runCommand}
+          onCancel={closeBar}
+        />
       ) : bar?.kind === "confirm" ? (
         <CommandBar
           prefix={`Close without handing back ${reviewedCount} verdict${reviewedCount === 1 ? "" : "s"}? (y/n)`}
@@ -927,14 +1042,14 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
           onCancel={closeBar}
         />
       ) : (
-      <StatusBar
-        order={order}
-        state={state}
-        position={view === "deck" ? statusPosition : ""}
-        pending={pending}
-        mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
-        message={message?.text ?? ""}
-      />
+        <StatusBar
+          order={order}
+          state={state}
+          position={view === "deck" ? statusPosition : ""}
+          pending={pending}
+          mode={[diffStyle === "unified" ? "unified" : "", ignoreWhitespace ? "ignoring whitespace" : ""].filter(Boolean).join(" · ")}
+          message={message?.text ?? ""}
+        />
       )}
       {help ? <Help onClose={() => setHelp(false)} /> : null}
       {palette && model ? (
@@ -984,14 +1099,3 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
 }
 
 const NO_NOTES: Note[] = []
-
-function ClosedScreen() {
-  return (
-    <div className="splash view-enter">
-      <div className="handed-back">
-        <h1>Closed without handing back</h1>
-        <p className="muted">Your progress is saved. You can close this tab.</p>
-      </div>
-    </div>
-  )
-}
