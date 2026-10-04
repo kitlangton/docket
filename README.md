@@ -9,7 +9,7 @@ docket reads diffs from your local git checkout and metadata from `gh`. It never
 ## Usage
 
 ```sh
-docket sessions/tui-cleanup.json          # curated manifest
+docket docket.json                        # curated manifest
 docket 52985 52988                        # PR numbers, in this order
 docket --author @me --state open          # anything gh pr list can filter
 docket my-branch                          # local branch against the base it most likely forked from
@@ -171,7 +171,7 @@ docket computes each item's size from its diff: **S** is at most 50 changed line
 
 ```json
 {
-  "session": "/abs/path/sessions/tui-cleanup.json",
+  "session": "/abs/path/docket.json",
   "reviewedAt": "2026-10-03T20:15:00.000Z",
   "prs": [
     {

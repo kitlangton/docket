@@ -1,4 +1,6 @@
 node_modules
 *.state.json
 verdicts.json
+demo-repo
+*.tgz
 .DS_Store
