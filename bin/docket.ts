@@ -53,6 +53,7 @@ const started = await serve({
   session,
   port: args.values.port ? Number(args.values.port) : 0,
   refresh: args.values.refresh,
+  onClose: () => close(),
   onHandback: (verdicts) => {
     console.log(summarize(verdicts))
     console.log(`verdicts: ${session.outPath}`)
@@ -64,7 +65,7 @@ console.log(`docket ${started.url}`)
 console.log(`  state ${session.statePath}`)
 if (args.values.open) Bun.spawn(["open", started.url], { stdout: "ignore", stderr: "ignore" })
 
-const close = () => {
+function close() {
   console.log(`docket: closed without hand-back; progress saved in ${session.statePath}`)
   process.exit(0)
 }

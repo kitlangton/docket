@@ -13,6 +13,7 @@ import {
   type Verdict,
 } from "../src/types"
 import { ClampedMarkdown, Markdown, markdownSummary } from "./markdown"
+import { displayKeys, helpRows } from "./keymap"
 import { countVerdicts, displayTitle, fuzzyScore, middleTruncate, noteCount, noteLocation, type Entry } from "./model"
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
@@ -318,7 +319,10 @@ export function VerdictPrompt(props: { label: string; verdict: Verdict | null | 
         </span>
         <span className="spacer" />
         <span className="hint">
-          <kbd>u</kbd> clear
+          <kbd>c</kbd> comment
+        </span>
+        <span className="hint">
+          <kbd>u</kbd> undo
         </span>
         <span className="hint">
           <kbd>J</kbd> next
@@ -330,6 +334,9 @@ export function VerdictPrompt(props: { label: string; verdict: Verdict | null | 
     <div className="verdict-prompt">
       <span className="verdict-prompt-label">Verdict on {props.label}</span>
       <span className="spacer" />
+      <span className="hint">
+        <kbd>c</kbd> comment
+      </span>
       <VerdictButton verdict="approve" k="a" label="Approve" onDecide={props.onDecide} />
       <VerdictButton verdict="reject" k="r" label="Reject" onDecide={props.onDecide} />
       <VerdictButton verdict="skip" k="s" label="Skip" onDecide={props.onDecide} />
@@ -361,7 +368,15 @@ export function PrSkeleton() {
   )
 }
 
-export function StatusBar(props: { order: string[]; state: ReviewState; mode: string; position: string }) {
+export function StatusBar(props: {
+  order: string[]
+  state: ReviewState
+  mode: string
+  position: string
+  pending: string
+  matches: string
+  message: string
+}) {
   const counts = countVerdicts(props.order, props.state)
   const reviewed = props.order.length - counts.unreviewed
   return (
@@ -372,7 +387,10 @@ export function StatusBar(props: { order: string[]; state: ReviewState; mode: st
         </span>
         {props.position ? <span className="muted">{props.position}</span> : null}
         {props.mode ? <span className="muted">{props.mode}</span> : null}
+        {props.matches ? <span className="status-matches tabular">{props.matches}</span> : null}
+        {props.message ? <span className="status-message">{props.message}</span> : null}
       </span>
+      {props.pending ? <span className="status-pending">{props.pending}</span> : null}
       <span className="status-right tabular">
         {reviewed} of {props.order.length} reviewed
       </span>
@@ -380,68 +398,70 @@ export function StatusBar(props: { order: string[]; state: ReviewState; mode: st
   )
 }
 
-const HELP: [string, [string, string][]][] = [
-  [
-    "Navigate",
-    [
-      ["j k", "Next / previous change"],
-      ["⌃n ⌃p", "Next / previous line"],
-      ["] [", "Next / previous file"],
-      ["J K", "Next / previous PR"],
-      ["g g", "Top of PR"],
-      ["G", "Bottom of PR"],
-      ["⌃d ⌃u", "Half page down / up"],
-    ],
-  ],
-  [
-    "Review",
-    [
-      ["a", "Approve, then next"],
-      ["r", "Reject with a reason"],
-      ["s", "Skip, then next"],
-      ["u", "Clear verdict"],
-      ["n", "Note on the PR"],
-      ["V", "Select lines to comment"],
-      ["e d", "Edit / delete a PR note"],
-      ["x", "Mark file viewed"],
-    ],
-  ],
-  [
-    "View",
-    [
-      ["f", "Jump to file"],
-      ["o", "Fold / unfold file"],
-      ["t", "Split / unified"],
-      ["z", "Ignore whitespace"],
-      ["O", "Open on GitHub"],
-      [":", "Summary"],
-      ["w", "Hand back (in summary)"],
-      ["?", "Toggle this help"],
-    ],
-  ],
-]
-
 export function Help(props: { onClose: () => void }) {
   return (
     <div className="overlay" onClick={props.onClose}>
       <div className="help" onClick={(event) => event.stopPropagation()}>
-        {HELP.map(([title, rows]) => (
-          <section key={title}>
-            <h2>{title}</h2>
+        {helpRows().map(({ group, rows }) => (
+          <section key={group}>
+            <h2>{group}</h2>
             <dl>
-              {rows.map(([keys, label]) => (
-                <div key={keys}>
+              {rows.map((binding) => (
+                <div key={binding.action + binding.keys.join()}>
                   <dt>
-                    <Keys>{keys}</Keys>
+                    {binding.keys.map((sequence, index) => (
+                      <span key={sequence} className="help-alt">
+                        {index ? <span className="help-or">/</span> : null}
+                        <Keys>{displayKeys(sequence)}</Keys>
+                      </span>
+                    ))}
                   </dt>
-                  <dd>{label}</dd>
+                  <dd>
+                    {binding.label}
+                    {binding.modes?.length === 1 && binding.modes[0] !== "normal" ? <span className="help-mode">{binding.modes[0]}</span> : null}
+                  </dd>
                 </div>
               ))}
             </dl>
           </section>
         ))}
+        <p className="help-foot">
+          Counts work on navigation: <Keys>3 j</Keys> <Keys>2 ]</Keys> <Keys>1 0 G</Keys>
+        </p>
       </div>
     </div>
+  )
+}
+
+/** The vim-style bottom line for `/` search and `:` commands. */
+export function CommandBar(props: {
+  prefix: string
+  value: string
+  onChange: (value: string) => void
+  onSubmit: (value: string) => void
+  onCancel: () => void
+}) {
+  return (
+    <footer className="status command-bar">
+      <span className="command-prefix">{props.prefix}</span>
+      <input
+        autoFocus
+        className="command-input"
+        value={props.value}
+        spellCheck={false}
+        onChange={(event) => props.onChange(event.target.value)}
+        onBlur={props.onCancel}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === "Escape") return props.onCancel()
+          if (event.key === "Backspace" && !props.value) return props.onCancel()
+          if (event.key === "Enter") {
+            event.preventDefault()
+            props.onSubmit(props.value)
+          }
+        }}
+      />
+    </footer>
   )
 }
 

@@ -19,6 +19,7 @@ export type ServeOptions = {
   port: number
   refresh: boolean
   onHandback: (verdicts: VerdictsFile) => void
+  onClose: () => void
 }
 
 export async function serve(options: ServeOptions) {
@@ -86,6 +87,14 @@ export async function serve(options: ServeOptions) {
         PUT: async (req) => {
           const state: ReviewState = await req.json()
           await Bun.write(session.statePath, JSON.stringify(state, null, 2))
+          return Response.json({ ok: true })
+        },
+      },
+      "/api/close": {
+        POST: async (req) => {
+          const state: ReviewState = await req.json()
+          await Bun.write(session.statePath, JSON.stringify(state, null, 2))
+          setTimeout(options.onClose, 150)
           return Response.json({ ok: true })
         },
       },

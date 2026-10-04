@@ -10,7 +10,7 @@ import {
   type Verdict,
 } from "../src/types"
 
-export type Row = { file: number; side: Side; line: number; kind: "context" | "add" | "del"; block: number | null }
+export type Row = { file: number; side: Side; line: number; kind: "context" | "add" | "del"; block: number | null; text: string }
 export type Block = { file: number; first: number; last: number; range: SelectedLineRange }
 export type PrModel = { files: FileDiffMetadata[]; focus: Set<string>; rows: Row[]; blocks: Block[]; large: boolean }
 
@@ -38,8 +38,9 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
       const pos = { old: hunk.deletionStart, new: hunk.additionStart }
       hunk.hunkContent.forEach((content, contentIndex) => {
         if (content.type === "context") {
-          range(content.lines).forEach(() => {
-            rows.push({ file: fileIndex, side: "additions", line: pos.new, kind: "context", block: null })
+          range(content.lines).forEach((offset) => {
+            const text = lineText(file.additionLines[content.additionLineIndex + offset])
+            rows.push({ file: fileIndex, side: "additions", line: pos.new, kind: "context", block: null, text })
             pos.old++
             pos.new++
           })
@@ -49,8 +50,14 @@ export function buildModel(patch: string, key: string, focusPaths: string[] = []
         const continues = hunk.hunkContent[contentIndex - 1]?.type === "change"
         const block = continues ? blocks.length - 1 : blocks.length
         const first = continues ? blocks[block]!.first : rows.length
-        range(content.deletions).forEach(() => rows.push({ file: fileIndex, side: "deletions", line: pos.old++, kind: "del", block }))
-        range(content.additions).forEach(() => rows.push({ file: fileIndex, side: "additions", line: pos.new++, kind: "add", block }))
+        range(content.deletions).forEach((offset) => {
+          const text = lineText(file.deletionLines[content.deletionLineIndex + offset])
+          rows.push({ file: fileIndex, side: "deletions", line: pos.old++, kind: "del", block, text })
+        })
+        range(content.additions).forEach((offset) => {
+          const text = lineText(file.additionLines[content.additionLineIndex + offset])
+          rows.push({ file: fileIndex, side: "additions", line: pos.new++, kind: "add", block, text })
+        })
         const start = rows[first]!
         const end = rows[rows.length - 1]!
         blocks[block] = {
@@ -139,6 +146,10 @@ export function middleTruncate(text: string, max = 22) {
   if (text.length <= max) return text
   const keep = Math.floor((max - 1) / 2)
   return `${text.slice(0, keep)}…${text.slice(-keep)}`
+}
+
+function lineText(line: string | undefined) {
+  return (line ?? "").replace(/\r?\n$/, "")
 }
 
 function range(length: number) {

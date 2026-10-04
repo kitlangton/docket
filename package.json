@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "bun bin/docket.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && bun scripts/keys.ts --check",
+    "keys": "bun scripts/keys.ts"
   },
   "dependencies": {
     "@pierre/diffs": "^1.5.1",

@@ -36,29 +36,78 @@ Progress is saved continuously, so a reload or restart resumes where you were. A
 
 ## Keys
 
-| Key                 | Action                                                                |
-| ------------------- | --------------------------------------------------------------------- |
-| `j` / `k`           | Next / previous change; `k` from the first change returns to the header |
-| `Ctrl-n` / `Ctrl-p` | Next / previous line                                                  |
-| `]` / `[`           | Next / previous file                                                  |
-| `J` / `K`           | Next / previous item                                                  |
-| `gg` / `G`          | Top / bottom of the item                                              |
-| `Ctrl-d` / `Ctrl-u` | Half page down / up                                                   |
-| `a`                 | Approve and advance                                                   |
-| `r`                 | Reject with an optional reason, and advance                           |
-| `s`                 | Skip and advance                                                      |
-| `u`                 | Clear the verdict                                                     |
-| `n` / `N`           | Note on the whole PR                                                  |
-| `V` / `v`           | Select lines (visual mode): `j`/`k` extend, `n` or `Enter` comments, `Esc` exits |
-| `f`                 | Jump to a file (fuzzy)                                                |
-| `x`                 | Mark the file under the cursor viewed (folds it; progress in the header) |
-| `o`                 | Fold / unfold the file under the cursor (deleted and viewed files start folded) |
-| `t`                 | Toggle split / unified                                                |
-| `z`                 | Toggle ignoring whitespace                                            |
-| `O`                 | Open on GitHub                                                        |
-| `Enter` or `:`      | Summary (`Enter` unfolds a folded file first)                         |
-| `w`                 | Hand back: write `verdicts.json` and exit (on the summary screen)     |
-| `?`                 | Help                                                                  |
+The keymap is Vim-flavored. This table is generated from `web/keymap.ts`, which also drives key handling and the `?` overlay; run `bun run keys` after changing it.
+
+<!-- keys:start -->
+| Keys | Action |
+| --- | --- |
+| **Navigate** | |
+| `j` / `]c` / `}` | Next change (count) |
+| `k` / `[c` / `{` | Previous change; from the first, the PR header (count) |
+| `Ctrl-n` | Next line (count) |
+| `Ctrl-p` | Previous line (count) |
+| `]` | Next file (count) |
+| `[` | Previous file (count) |
+| `J` | Next PR (count) |
+| `K` | Previous PR (count) |
+| `gg` | Top of PR |
+| `G` | Bottom of PR; with a count, that line of the current file (count) |
+| `Ctrl-d` | Half page down (count) |
+| `Ctrl-u` | Half page up (count) |
+| `Ctrl-f` | Page down (count) |
+| `Ctrl-b` | Page up (count) |
+| `Ctrl-e` | Scroll one line down (count) |
+| `Ctrl-y` | Scroll one line up (count) |
+| `zz` | Cursor line to center |
+| `zt` | Cursor line to top |
+| `zb` | Cursor line to bottom |
+| `Ctrl-o` | Jump back (count) |
+| `Ctrl-i` / `Tab` | Jump forward (count) |
+| **Search** | |
+| `/` | Search the diff |
+| `n` | Next match (count) |
+| `N` | Previous match (count) |
+| `*` | Search word under cursor forward |
+| `#` | Search word under cursor back |
+| **Review** | |
+| `a` | Approve, then next |
+| `r` | Reject with a reason |
+| `s` | Skip, then next |
+| `u` | Undo verdict change |
+| `Ctrl-r` | Redo verdict change |
+| `c` | Comment on the PR |
+| `C` | Comment on the PR (also in visual mode) |
+| `V` / `v` | Select lines (visual mode) |
+| `j` / `Ctrl-n` / `ArrowDown` | Extend selection down _(visual)_ |
+| `k` / `Ctrl-p` / `ArrowUp` | Extend selection up _(visual)_ |
+| `c` / `Enter` | Comment on the selected lines _(visual)_ |
+| `e` / `Enter` | Edit the focused PR note _(note)_ |
+| `d` | Delete the focused PR note _(note)_ |
+| `x` | Mark file viewed |
+| **Folds** | |
+| `za` / `o` | Toggle fold |
+| `zo` | Open fold |
+| `zc` | Close fold |
+| `zR` | Open all folds |
+| `zM` | Fold all files |
+| **Commands** | |
+| `:` | Command line (:w :q :wq :s :<PR number>) |
+| `Enter` | Summary (unfolds a folded file first) |
+| `ZZ` | Hand back and close |
+| `f` | Jump to file |
+| `t` | Split / unified |
+| `zw` | Ignore whitespace |
+| `O` | Open on GitHub |
+| `?` | Toggle this help |
+| `Escape` | Cancel pending key, selection, or search highlight |
+| `w` | Hand back _(summary)_ |
+<!-- keys:end -->
+
+Sequences like `gg`, `]c`, and `zz` are typed one key after another; a bare `]` or `[` runs after a short pause (about 400 ms) if no `c` follows. Bindings marked "(count)" take a count prefix such as `3j`, `2]`, or `5J`; `10G` goes to line 10 of the current file. The status bar shows a pending count or key while you type.
+
+`/` searches the current PR's diff text on both sides (smartcase, literal), highlighting matches as you type; `Enter` confirms and `Esc` restores where you were. `n`/`N` move between matches and wrap with a brief "Search wrapped". `*`/`#` search for the first identifier on the cursor line as a whole word. Matches in folded files unfold when you jump to them.
+
+`:` opens a command line: `:w` (or `:wq`, `ZZ`) hands back and exits, `:q` closes without handing back (asking first if you have verdicts; `:q!` skips the question), `:s` or `:summary` opens the summary, and `:52987` jumps to that PR (or `:3` to the third). `C-o` and `C-i`/`Tab` walk the jumplist of big jumps: `gg`, `G`, the file palette, PR switches, searches, and `:N`. `u` and `C-r` undo and redo verdicts given in this session.
 
 PR notes are listed under the header. From the header, `j`/`k` step through them; `e` (or `Enter`) edits the focused note, `d` deletes it, and `Esc` leaves. In a note editor, `Enter` saves, `Shift-Enter` inserts a newline, and `Esc` cancels; saving an empty note deletes it.
 
