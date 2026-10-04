@@ -27,6 +27,8 @@
     "src",
     "web",
     "scripts",
+    "examples",
+    "skill",
     "README.md",
     "LICENSE"
   ],
