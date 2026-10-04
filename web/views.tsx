@@ -89,7 +89,6 @@ export function Rail(props: {
                 </span>
               </div>
             )}
-            {isCurrentGroup && group.why && !single ? <p className="rail-group-why">{group.why}</p> : null}
             {group.prs.map((pr) => {
               const id = itemId(pr)
               const load = props.items[id]
@@ -463,6 +462,7 @@ export function Summary(props: {
                   </span>
                 </div>
               ) : null}
+              {group.why && props.manifest.groups.length > 1 ? <p className="ledger-group-why">{group.why}</p> : null}
               {group.prs.map((pr) => {
                 const id = itemId(pr)
                 const load = props.items[id]
