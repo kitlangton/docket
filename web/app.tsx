@@ -1,7 +1,8 @@
 import { DIFFS_TAG_NAME, type SelectedLineRange } from "@pierre/diffs"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { itemLabel, type Note, type PrReview, type ReviewState, type SessionPayload, type Side, type Verdict } from "../src/types"
-import { FileBlock, SEPARATOR_STYLES, type Draft, type SeparatorStyle } from "./diff"
+import { FileBlock, type Draft } from "./diff"
+import { SEPARATOR_STYLES, type SeparatorStyle } from "./separators"
 import { buildModel, EMPTY_REVIEW, entries as toEntries, nextUnreviewed, rangeAnchor, type PrModel, type Row } from "./model"
 import { FilePalette, HandedBack, Help, PrHeader, PrNotes, PrSkeleton, Prompt, Rail, StatusBar, Summary, VerdictPrompt } from "./views"
 
@@ -58,7 +59,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState }) {
   )
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [separator, setSeparator] = useState<SeparatorStyle>(
-    () => SEPARATOR_STYLES.find((style) => style === localStorage.getItem("docket.separator")) ?? "ellipsis",
+    () => SEPARATOR_STYLES.find((style) => style === localStorage.getItem("docket.separator")) ?? "squiggle",
   )
   const [toast, setToast] = useState<{ text: string; at: number } | null>(null)
   useEffect(() => {

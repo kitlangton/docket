@@ -2,6 +2,7 @@ import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from "@p
 import { FileDiff, type FileDiffOptions } from "@pierre/diffs/react"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Note, Side } from "../src/types"
+import { separatorCSS, stampSeparators, type SeparatorStyle } from "./separators"
 
 export type Draft = { path: string; side: Side; startLine?: number; line: number; body: string; noteId?: string }
 
@@ -56,75 +57,6 @@ const BASE_CSS = /* css */ `
 [data-column-number][data-selected-line][data-line-type=change-deletion] { color: var(--reject); }
 `
 
-export const SEPARATOR_STYLES = ["ellipsis", "hairline", "gap", "dotted", "squiggle-faint"] as const
-export type SeparatorStyle = (typeof SEPARATOR_STYLES)[number]
-
-// Unmodified-lines rows. Every variant hides the library's label and draws with pseudo-elements, reading the
-// count from data-count (stamped in onPostRender). The left gutter is the deletions or unified gutter.
-const SEPARATOR_BASE = /* css */ `
-[data-separator=line-info-basic] { height: 16px; background-color: transparent; }
-[data-separator=line-info-basic] [data-separator-wrapper] { display: none; }
-[data-separator=line-info-basic]::before, [data-separator=line-info-basic]::after { position: absolute; pointer-events: none; }
-`
-const GUTTER_COUNT = /* css */ `
-:is([data-deletions], [data-unified]) [data-gutter] [data-separator=line-info-basic]::after {
-  content: attr(data-count);
-  top: 0; right: 0; padding: 0 1ch 0 4px;
-  background: var(--bg);
-  color: var(--text-4);
-  font: 10px/16px var(--sans);
-  font-variant-numeric: tabular-nums;
-}
-`
-const TEXT_COUNT = /* css */ `
-:is([data-deletions], [data-unified]) [data-content] [data-separator=line-info-basic]::after {
-  content: "… " attr(data-count) " lines";
-  top: 0; left: 1ch; padding-right: 6px;
-  background: var(--bg);
-  color: var(--text-4);
-  font: 11px/18px var(--sans);
-  font-variant-numeric: tabular-nums;
-}
-`
-const SEPARATOR_CSS: Record<SeparatorStyle, string> = {
-  hairline:
-    GUTTER_COUNT +
-    `[data-separator=line-info-basic]::before { content: ""; left: 0; right: 0; top: 50%; border-top: 1px solid var(--sep); }`,
-  gap: /* css */ `
-[data-separator=line-info-basic] { height: 8px; }
-:is([data-deletions], [data-unified]) [data-gutter] [data-separator=line-info-basic]::after {
-  content: "⋯"; top: 0; right: 1ch; color: var(--text-4); font: 10px/8px var(--sans);
-}
-:is([data-deletions], [data-unified]) [data-gutter] [data-separator=line-info-basic]:hover::after { content: attr(data-count); }
-`,
-  ellipsis: `[data-separator=line-info-basic] { height: 18px; }` + TEXT_COUNT,
-  dotted:
-    GUTTER_COUNT +
-    `[data-separator=line-info-basic]::before { content: ""; left: 0; right: 0; top: 50%; border-top: 1px dotted var(--sep-strong); }`,
-  "squiggle-faint":
-    `[data-separator=line-info-basic] { height: 18px; }` +
-    TEXT_COUNT +
-    /* css */ `
-[data-separator=line-info-basic]::before {
-  content: ""; inset: 0;
-  background-color: var(--sep);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='4' viewBox='0 0 12 4'%3E%3Cpath d='M0 2 Q3 0.8 6 2 T12 2' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 4px;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='4' viewBox='0 0 12 4'%3E%3Cpath d='M0 2 Q3 0.8 6 2 T12 2' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left center / 12px 4px;
-}
-[data-gutter] [data-separator=line-info-basic]::before { -webkit-mask-position: right center; mask-position: right center; }
-`,
-}
-
-/** Stamps each unmodified-lines row with its count so the separator CSS can render it. */
-function stampSeparators(node: HTMLElement) {
-  node.shadowRoot?.querySelectorAll<HTMLElement>("[data-separator]").forEach((element) => {
-    const count = element.textContent?.match(/\d+/)?.[0]
-    if (!count) return
-    element.dataset.count = count
-    element.title = `${count} unmodified lines`
-  })
-}
-
 const CURSOR_CSS = /* css */ `
 [data-column-number][data-selected-line] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 40%, transparent); }
 [data-column-number]:is([data-selected-line=first], [data-selected-line=single]) { box-shadow: inset 2px 0 0 var(--accent); color: var(--text); }
@@ -152,9 +84,9 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       hunkSeparators: "line-info-basic",
       lineDiffType: "word-alt",
       overflow: "scroll",
-      unsafeCSS: BASE_CSS + SEPARATOR_BASE + SEPARATOR_CSS[props.separator] + (props.visual ? VISUAL_CSS : CURSOR_CSS),
+      unsafeCSS: BASE_CSS + separatorCSS(props.separator) + (props.visual ? VISUAL_CSS : CURSOR_CSS),
       onPostRender: (node, _instance, phase) => {
-        if (phase !== "unmount") stampSeparators(node)
+        if (phase !== "unmount") stampSeparators(node, props.file)
       },
       enableGutterUtility: true,
       enableLineSelection: true,
@@ -164,7 +96,7 @@ export const FileBlock = memo(function FileBlock(props: FileBlockProps) {
       },
       onLineClick: (event) => onLine(index, event.annotationSide, event.lineNumber),
     }),
-    [props.diffStyle, props.separator, props.visual, onLine, onRange, index],
+    [props.diffStyle, props.separator, props.visual, props.file, onLine, onRange, index],
   )
 
   const annotations = useMemo(() => {

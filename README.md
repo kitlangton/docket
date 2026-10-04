@@ -55,7 +55,7 @@ Progress is saved continuously, so a reload or restart resumes where you were. A
 | `o`                 | Fold / unfold the file under the cursor (deleted and viewed files start folded) |
 | `t`                 | Toggle split / unified                                                |
 | `z`                 | Toggle ignoring whitespace                                            |
-| `,`                 | Cycle the unmodified-lines separator style (ellipsis, hairline, gap, dotted, squiggle-faint) |
+| `,`                 | Cycle the unmodified-lines separator style (squiggle, squiggle-label, inset, github, vertical-ellipsis, torn, ellipsis) |
 | `O`                 | Open on GitHub                                                        |
 | `Enter` or `:`      | Summary (`Enter` unfolds a folded file first)                         |
 | `w`                 | Hand back: write `verdicts.json` and exit (on the summary screen)     |
