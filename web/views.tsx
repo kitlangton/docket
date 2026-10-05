@@ -13,8 +13,10 @@ import {
   type Verdict,
 } from "../src/types"
 import { ClampedMarkdown, Markdown, markdownSummary } from "./markdown"
-import { displayKeys, helpRows } from "./keymap"
+import { displayKeys, GROUPS, helpRows, type Group } from "./keymap"
 import { countVerdicts, displayTitle, fuzzyScore, middleTruncate, noteCount, noteLocation, type Entry } from "./model"
+
+const REVIEW_GROUPS = GROUPS.filter((group) => group !== "Pick")
 
 const VERDICT_LABEL: Record<Verdict, string> = { approve: "Approved", reject: "Rejected", skip: "Skipped" }
 const STATE_LABEL = { OPEN: "Open", MERGED: "Merged", CLOSED: "Closed", LOCAL: "Local" }
@@ -394,18 +396,19 @@ export function StatusBar(props: {
   )
 }
 
-export function Help(props: { onClose: () => void }) {
+/** Review keys by default; picks pass their own group. */
+export function Help(props: { onClose: () => void; groups?: Group[] }) {
   return (
     <div className="overlay" onClick={props.onClose}>
       <div className="help" onClick={(event) => event.stopPropagation()}>
-        {helpRows().map(({ group, rows }) => (
+        {helpRows(props.groups ?? REVIEW_GROUPS).map(({ group, rows }) => (
           <section key={group}>
             <h2>{group}</h2>
             <dl>
               {rows.map((binding) => (
                 <div key={binding.action + binding.keys.join()}>
                   <dt>
-                    {binding.keys.map((sequence, index) => (
+                    {(binding.display ? [binding.display] : binding.keys).map((sequence, index) => (
                       <span key={sequence} className="help-alt">
                         {index ? <span className="help-or">/</span> : null}
                         <Keys>{displayKeys(sequence)}</Keys>

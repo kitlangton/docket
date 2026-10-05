@@ -190,6 +190,25 @@ Generated from `web/keymap.ts`, which also drives key handling and the `?` overl
 | `k` / `ArrowUp` | Previous session _(home)_ |
 | `Enter` / `o` | Open session _(home)_ |
 | `d` | Archive a session that isn't waiting _(home)_ |
+| **Pick** | |
+| `h` / `ArrowLeft` | Previous option |
+| `l` / `ArrowRight` | Next option |
+| `1–9` | Option by number |
+| `j` / `ArrowDown` | Next media item of the option _(pick)_ |
+| `k` / `ArrowUp` | Previous media item of the option _(pick)_ |
+| `g` | Grid overview |
+| `Enter` / `o` | Open the option _(grid)_ |
+| `v` | Side by side with the next option _(pick)_ |
+| `t` | Light / dark |
+| `b` | Hold to show the baseline _(pick)_ |
+| `Space` | Pause / play videos |
+| `p` / `Enter` | Pick or unpick; pick order is the ranking _(pick)_ |
+| `c` | Note on the option: click the image to pin it; on a video it stamps the time _(pick)_ |
+| `C` | Overall note |
+| `0` | None of these |
+| `:` | Command line (:w submit, :q close) |
+| `ZZ` | Submit |
+| `Escape` | Back to one option |
 <!-- keys:end -->
 
 Sequences (`gg`, `]c`, `zz`) are typed in order; a bare `]` or `[` runs after about 400 ms. "(count)" bindings take a count, like `3j` or `2]`; `10G` goes to line 10 of the current file.

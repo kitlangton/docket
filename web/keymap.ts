@@ -3,8 +3,8 @@
  * (`bun run keys` regenerates it), so the three cannot drift.
  */
 
-export type Mode = "normal" | "visual" | "note" | "summary" | "home" | "tree"
-type Group = "Navigate" | "Review" | "Folds" | "Commands" | "Inbox"
+export type Mode = "normal" | "visual" | "note" | "summary" | "home" | "tree" | "pick" | "grid"
+export type Group = "Navigate" | "Review" | "Folds" | "Commands" | "Inbox" | "Pick"
 
 export type Action =
   | "changeNext"
@@ -78,6 +78,24 @@ export type Action =
   | "homePrev"
   | "homeOpen"
   | "homeArchive"
+  | "pickPrev"
+  | "pickNext"
+  | "pickJump"
+  | "pickMediaNext"
+  | "pickMediaPrev"
+  | "pickGrid"
+  | "pickOpen"
+  | "pickSide"
+  | "pickTheme"
+  | "pickBaseline"
+  | "pickPlay"
+  | "pickToggle"
+  | "pickNote"
+  | "pickOverall"
+  | "pickNone"
+  | "pickCommand"
+  | "pickSubmit"
+  | "pickBack"
 
 export type Binding = {
   /** Alternative key sequences; keys within a sequence are space-separated, e.g. "g g", "C-d", "] c". */
@@ -90,6 +108,8 @@ export type Binding = {
   count?: boolean
   /** Left out of the help overlay and README (e.g. arrow-key aliases). */
   hidden?: boolean
+  /** Shown instead of the key list, for a run of keys like 1–9. */
+  display?: string
 }
 
 export const KEYMAP: Binding[] = [
@@ -174,7 +194,7 @@ export const KEYMAP: Binding[] = [
     action: "help",
     label: "Toggle this help",
     group: "Commands",
-    modes: ["normal", "visual", "note", "summary", "home", "tree"],
+    modes: ["normal", "visual", "note", "summary", "home", "tree", "pick", "grid"],
   },
   { keys: ["Escape"], action: "cancel", label: "Cancel pending key or selection", group: "Commands", modes: ["normal", "note"] },
 
@@ -189,9 +209,36 @@ export const KEYMAP: Binding[] = [
   { keys: ["k", "ArrowUp"], action: "homePrev", label: "Previous session", group: "Inbox", modes: ["home"] },
   { keys: ["Enter", "o"], action: "homeOpen", label: "Open session", group: "Inbox", modes: ["home"] },
   { keys: ["d"], action: "homeArchive", label: "Archive a session that isn't waiting", group: "Inbox", modes: ["home"] },
+
+  { keys: ["h", "ArrowLeft"], action: "pickPrev", label: "Previous option", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["l", "ArrowRight"], action: "pickNext", label: "Next option", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["k", "ArrowUp"], action: "pickPrev", label: "Previous option", group: "Pick", modes: ["grid"], hidden: true },
+  { keys: ["j", "ArrowDown"], action: "pickNext", label: "Next option", group: "Pick", modes: ["grid"], hidden: true },
+  { keys: [..."123456789"], display: "1–9", action: "pickJump", label: "Option by number", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["j", "ArrowDown"], action: "pickMediaNext", label: "Next media item of the option", group: "Pick", modes: ["pick"] },
+  { keys: ["k", "ArrowUp"], action: "pickMediaPrev", label: "Previous media item of the option", group: "Pick", modes: ["pick"] },
+  { keys: ["g"], action: "pickGrid", label: "Grid overview", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["Enter", "o"], action: "pickOpen", label: "Open the option", group: "Pick", modes: ["grid"] },
+  { keys: ["v"], action: "pickSide", label: "Side by side with the next option", group: "Pick", modes: ["pick"] },
+  { keys: ["t"], action: "pickTheme", label: "Light / dark", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["b"], action: "pickBaseline", label: "Hold to show the baseline", group: "Pick", modes: ["pick"] },
+  { keys: ["Space"], action: "pickPlay", label: "Pause / play videos", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["p", "Enter"], action: "pickToggle", label: "Pick or unpick; pick order is the ranking", group: "Pick", modes: ["pick"] },
+  {
+    keys: ["c"],
+    action: "pickNote",
+    label: "Note on the option: click the image to pin it; on a video it stamps the time",
+    group: "Pick",
+    modes: ["pick"],
+  },
+  { keys: ["C"], action: "pickOverall", label: "Overall note", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["0"], action: "pickNone", label: "None of these", group: "Pick", modes: ["pick", "grid"] },
+  { keys: [":"], action: "pickCommand", label: "Command line (:w submit, :q close)", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["Z Z"], action: "pickSubmit", label: "Submit", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["Escape"], action: "pickBack", label: "Back to one option", group: "Pick", modes: ["pick", "grid"] },
 ]
 
-export const GROUPS: Group[] = ["Navigate", "Review", "Folds", "Commands", "Inbox"]
+export const GROUPS: Group[] = ["Navigate", "Review", "Folds", "Commands", "Inbox", "Pick"]
 
 // An ambiguous prefix (`]` before `] c`) waits this long before running the shorter binding.
 const SEQUENCE_TIMEOUT = 400
@@ -205,7 +252,9 @@ export type Pending = { count: string; keys: string[] }
  * Returns what to do: run a binding now, wait (optionally running a binding on timeout), or nothing matched.
  */
 export function feed(pending: Pending, key: string, modes: Mode[]) {
-  if (/^[0-9]$/.test(key) && !pending.keys.length && (key !== "0" || pending.count)) {
+  // Digits build a count, unless a mode here binds the digit itself (picks jump to option n).
+  const bound = modes.some((mode) => KEYMAP.some((binding) => (binding.modes ?? ["normal"]).includes(mode) && binding.keys.includes(key)))
+  if (/^[0-9]$/.test(key) && !bound && !pending.keys.length && (key !== "0" || pending.count)) {
     return { kind: "wait" as const, pending: { count: pending.count + key, keys: [] }, timeout: PREFIX_TIMEOUT }
   }
   const keys = [...pending.keys, key]
@@ -233,10 +282,20 @@ export function feed(pending: Pending, key: string, modes: Mode[]) {
 
 export function keyName(event: KeyboardEvent) {
   if (event.ctrlKey && event.key.length === 1) return `C-${event.key.toLowerCase()}`
+  if (event.key === " ") return "Space"
   return event.key
 }
 
-const DISPLAY: Record<string, string> = { Escape: "esc", Enter: "↵", ArrowDown: "↓", ArrowUp: "↑", Tab: "tab" }
+const DISPLAY: Record<string, string> = {
+  Escape: "esc",
+  Enter: "↵",
+  ArrowDown: "↓",
+  ArrowUp: "↑",
+  ArrowLeft: "←",
+  ArrowRight: "→",
+  Tab: "tab",
+  Space: "space",
+}
 
 /** A sequence for display: "C-d" → "⌃d", "g g" → "g g". */
 export function displayKeys(sequence: string) {
@@ -247,8 +306,8 @@ export function displayKeys(sequence: string) {
 }
 
 /** Bindings for the help overlay and README, grouped, without the hidden ones. */
-export function helpRows() {
-  return GROUPS.map((group) => ({
+export function helpRows(groups: Group[] = GROUPS) {
+  return groups.map((group) => ({
     group,
     rows: KEYMAP.filter((binding) => binding.group === group && !binding.hidden),
   }))
@@ -258,7 +317,9 @@ export function readmeTable() {
   const lines = helpRows().flatMap(({ group, rows }) => [
     `| **${group}** | |`,
     ...rows.map((binding) => {
-      const keys = binding.keys.map((sequence) => `\`${sequence.replace(/^C-/, "Ctrl-").replace(/ /g, "")}\``).join(" / ")
+      const keys = binding.display
+        ? `\`${binding.display}\``
+        : binding.keys.map((sequence) => `\`${sequence.replace(/^C-/, "Ctrl-").replace(/ /g, "")}\``).join(" / ")
       const mode = binding.modes?.length === 1 && binding.modes[0] !== "normal" ? ` _(${binding.modes[0]})_` : ""
       return `| ${keys} | ${binding.label}${mode}${binding.count ? " (count)" : ""} |`
     }),

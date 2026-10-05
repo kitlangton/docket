@@ -154,11 +154,17 @@ function InboxRow(props: { row: InboxEntry; selected: boolean; onOpen: () => voi
           <Glyph verdict={null} />
         )}
       </span>
+      {row.kind === "pick" ? <PickGlyph /> : null}
       <span className="inbox-main">
         <span className="inbox-title">{row.title}</span>
         <span className="inbox-source">{source}</span>
       </span>
-      {row.status === "done" ? (
+      {row.pick && row.status === "done" ? (
+        <span className="inbox-answer">
+          {row.pick.thumb ? <img className="inbox-thumb" src={row.pick.thumb} alt="" /> : null}
+          <span className="tabular">{row.pick.none ? "None" : row.pick.picked.join(" · ") || "No pick"}</span>
+        </span>
+      ) : row.status === "done" ? (
         <span className="inbox-verdicts tabular">
           {row.counts.approve ? <span className="is-approve">✓ {row.counts.approve}</span> : null}
           {row.counts.reject ? <span className="is-reject">✕ {row.counts.reject}</span> : null}
@@ -192,6 +198,18 @@ function InboxRow(props: { row: InboxEntry; selected: boolean; onOpen: () => voi
         </button>
       )}
     </div>
+  )
+}
+
+/** Marks a pick session: a small 2×2 grid, unlike the round review glyphs. */
+function PickGlyph() {
+  return (
+    <svg className="inbox-kind" width="12" height="12" viewBox="0 0 12 12" aria-label="pick">
+      <rect x="1" y="1" width="4" height="4" rx="1" />
+      <rect x="7" y="1" width="4" height="4" rx="1" />
+      <rect x="1" y="7" width="4" height="4" rx="1" />
+      <rect x="7" y="7" width="4" height="4" rx="1" />
+    </svg>
   )
 }
 

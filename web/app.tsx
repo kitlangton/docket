@@ -5,12 +5,15 @@ import {
   type Note,
   type PrReview,
   type ReviewState,
+  type PickPayload,
+  type PickState,
   type ServerEvent,
   type SessionPayload,
   type Side,
   type Verdict,
 } from "../src/types"
 import { Home } from "./home"
+import { PickDeck } from "./pick"
 import { FileBlock, OutdatedNotes, type Draft } from "./diff"
 import { rowElement } from "./dom"
 import { expandAround, fileKey, loader } from "./expand"
@@ -116,8 +119,8 @@ export function App() {
 }
 
 function SessionView(props: { id: string; tick: number; flush: RefObject<() => void>; onHome: () => void }) {
-  const [session, setSession] = useState<SessionPayload>()
-  const [state, setState] = useState<ReviewState>()
+  const [session, setSession] = useState<SessionPayload | PickPayload>()
+  const [state, setState] = useState<ReviewState | PickState>()
   const [missing, setMissing] = useState(false)
   const base = `/api/s/${encodeURIComponent(props.id)}`
 
@@ -136,7 +139,9 @@ function SessionView(props: { id: string; tick: number; flush: RefObject<() => v
 
   if (missing) return <MissingSession onHome={props.onHome} />
   if (!session || !state) return <div className="splash" />
-  return <Deck session={session} initial={state} base={base} flush={props.flush} onHome={props.onHome} />
+  if ("kind" in session)
+    return <PickDeck payload={session} initial={state as PickState} base={base} flush={props.flush} onHome={props.onHome} />
+  return <Deck session={session} initial={state as ReviewState} base={base} flush={props.flush} onHome={props.onHome} />
 }
 
 function MissingSession(props: { onHome: () => void }) {
@@ -863,7 +868,7 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   // Each action returns false when it does not apply here, so the next mode can handle the key.
   // Every deck action needs a handler; the inbox handles its own.
-  const actions: Record<Exclude<Action, `home${string}`>, (count: number | undefined) => boolean | void> = {
+  const actions: Record<Exclude<Action, `home${string}` | `pick${string}`>, (count: number | undefined) => boolean | void> = {
     goHome: () => props.onHome(),
     changeNext: (count) => changeStep(1, count ?? 1),
     changePrev: (count) => changeStep(-1, count ?? 1),
