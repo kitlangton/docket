@@ -118,14 +118,17 @@ Every item appears in manifest order, with `number` or `ref`. `verdict` is `appr
 
 ## Picks
 
-`docket pick` shows a gallery of options (screenshots, light/dark pairs, videos, live pages, local prototypes, or text) and hands back which ones you chose, in rank order, with your notes. It uses the same server, inbox, and waiting contract as reviews.
+`docket pick` shows a gallery of options (screenshots, light/dark pairs, videos, live pages, local prototypes, or text) as a grid of cards and hands back the one you chose, with your notes. It uses the same server, inbox, and waiting contract as reviews.
 
 ```sh
 docket pick round-2/pick.json            # prints the link, blocks until you submit
 docket pick pick.json --timeout 30m      # gives up waiting after 30 minutes; the pick stays in the inbox
+docket answer <id|url> --pick C --note "…"   # record an answer given in chat
 ```
 
-On submit it prints a summary and `answer: <path>`, and exits 0. Closing without submitting (or Ctrl-C) exits 0 with `closed without answer`.
+On Send it prints a summary and `answer: <path>`, and exits 0. Closing without sending (or Ctrl-C) exits 0 with `closed without answer`.
+
+`docket answer` takes the session id or its URL, with `--pick` (repeat it for a ranked pick), `--none`, and `--note`. It answers exactly as Send does: the waiting `docket pick` exits with the same summary, the open page shows the answer, and the inbox marks it done. Unknown option ids are an error.
 
 ### Pick manifest
 
@@ -133,6 +136,7 @@ On submit it prints a summary and `answer: <path>`, and exits 0. Closing without
 {
   "title": "Code block style",
   "question": "Which code block style?",
+  "pick": "one",
   "baseline": { "light": "current-light.png", "dark": "current-dark.png" },
   "options": [
     { "id": "A", "label": "Card", "why": "Markdown.", "media": [{ "light": "card-l.png", "dark": "card-d.png" }, "card-scroll.mp4"] },
@@ -146,7 +150,8 @@ On submit it prints a summary and `answer: <path>`, and exits 0. Closing without
 - Only `title` and `options` are required; each option needs `media` or a `body`. `id` defaults to A, B, C…, `label` to the first file or folder name.
 - Paths are relative to the manifest and must stay inside its folder; docket serves that folder and nothing else.
 - The kind comes from the extension: png, jpg, jpeg, webp, and gif are images; mp4, mov, and webm are videos; `.html` or a folder with `index.html` is a local prototype (its folder is served, so relative assets work); `.md` is text; `http(s)` URLs are live pages.
-- `{ "light": …, "dark": … }` makes a pair that `t` flips. `baseline` is what exists today; hold `b` to see it in place.
+- `"pick": "many"` allows several picks, in rank order; the default `"one"` lets a new pick replace the last.
+- A card shows its videos full width, always playing, and its stills two to a row. `{ "light": …, "dark": … }` makes a pair that the Dark/Light switch (or `t`) flips. `baseline` is what exists today; hold `b` to see it in place.
 - `previous` points at an earlier round's `answer.json`, shown collapsed at the top.
 
 ### answer.json
@@ -167,9 +172,9 @@ Written next to the manifest (or `--out`):
 }
 ```
 
-`picked` is in rank order. `media` is the index into the option's `media`. A pin's `x`/`y` are fractions of the image; `t` is seconds into a video. `none` means none of these; the reason is usually in `note`.
+`picked` is always an array: one id, or several in rank order with `"pick": "many"`. `media` is the index into the option's `media`. A pin's `x`/`y` are fractions of the image; `t` is seconds into a video. `none` means none of these; the reason is usually in `note`.
 
-Flip with `h`/`l` or `1`–`9`, `g` for the grid, `v` for side by side, `p` to pick, `c` to note (click to pin), `0` for none, `ZZ` or `:w` to submit. On a phone, swipe between options and use the buttons along the bottom. The full list is under **Pick** in [Keys](#keys).
+Arrow keys or `h`/`l` move between cards, `p` picks, `Enter` or `1`–`9` opens an option full size (`g` or `Esc` back), `c` adds a note (click a still to pin it), `0` is none of these, and `ZZ` or `:w` sends. On a phone, tap Pick and Send, tap a still to open it, and swipe between options. The full list is under **Pick** in [Keys](#keys).
 
 ## Keys
 

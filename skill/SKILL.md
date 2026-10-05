@@ -104,6 +104,7 @@ Use `docket pick` only when the user asks for options or a decision ("show me a 
    {
      "title": "Code block style",
      "question": "Which code block style?",
+     "pick": "one",
      "baseline": { "light": "current-light.png", "dark": "current-dark.png" },
      "options": [
        { "label": "Card", "why": "One line on the idea and its trade-off.", "media": [{ "light": "a-light.png", "dark": "a-dark.png" }, "a-scroll.mp4"] },
@@ -113,13 +114,13 @@ Use `docket pick` only when the user asks for options or a decision ("show me a 
    }
    ```
 
-   Only `title` and `options` are required. Ids default to A, B, C…. Paths are relative to the manifest and must stay in its folder. For a second round, start a new folder and set `previous` to the last `answer.json`.
+   Only `title` and `options` are required. Ids default to A, B, C…. Each card shows its videos full width and its stills two to a row, so give each option one video plus a pair of stills (for example at rest and mid-interaction), each as a light/dark pair. Set `"pick": "many"` only if a ranking helps; by default the user picks one. Paths are relative to the manifest and must stay in its folder. For a second round, start a new folder and set `previous` to the last `answer.json`.
 3. **Run it in the background** and wait; don't poll: `docket pick path/to/pick.json`. It prints a local link and, on a tailnet, a `https://…ts.net:<port>/s/<id>` link. Post the ts.net one, which also works on a phone. Add `--timeout 30m` if you shouldn't wait forever.
 4. **Act on `answer.json`** (the output ends with `answer: <path>`):
 
    ```ts
-   { session, answeredAt, picked: string[] /* rank order */, none: boolean, note: string,
+   { session, answeredAt, picked: string[] /* one id, or a ranking with "pick": "many" */, none: boolean, note: string,
      notes: [{ option, body, media /* index */, at?: { x, y } /* fractions of the image */ | { t } /* video seconds */ }] }
    ```
 
-   Build `picked[0]`, applying its notes. A pin locates the complaint on that image. Use lower ranks only as fallbacks or to borrow details the user's notes point at. `none: true` means start over; the reason is in `note`. `closed without answer` means the user stopped; ask before relaunching. `timed out` leaves the pick open in their inbox.
+   If the user answers in chat instead ("C"), record it with `docket answer <id|url> --pick C [--note "…"]`; the waiting command then exits as if they had pressed Send. Build `picked[0]`, applying its notes and the overall `note`. A pin locates the complaint on that image. Use lower ranks only as fallbacks or to borrow details the user's notes point at. `none: true` means start over; the reason is in `note`. `closed without answer` means the user stopped; ask before relaunching. `timed out` leaves the pick open in their inbox.
