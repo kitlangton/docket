@@ -48,6 +48,7 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => routeOf(location.pathname))
   const [inboxTick, setInboxTick] = useState(0)
   const [sessionTicks, setSessionTicks] = useState<Record<string, number>>({})
+  const [stopped, setStopped] = useState(false)
   const flush = useRef<() => void>(() => {})
 
   const navigate = useCallback((path: string) => {
@@ -75,6 +76,7 @@ export function App() {
         // A restarted server running newer code means this page is stale.
         if (seen.version && seen.version !== event.version) location.reload()
         seen.version = event.version
+        setStopped(false)
         setInboxTick((tick) => tick + 1)
         return
       }
@@ -86,6 +88,7 @@ export function App() {
         return
       }
       if (event.type === "restart") flush.current()
+      if (event.type === "stopped") setStopped(true)
     }
     source.current.onmessage = onMessage
     // EventSource retries on its own, but gives up for good on some failures; reconnect those by hand.
@@ -100,6 +103,14 @@ export function App() {
     }
   }, [navigate])
 
+  if (stopped)
+    return (
+      <div className="splash view-enter">
+        <div className="handed-back">
+          <h1>Stopped</h1>
+        </div>
+      </div>
+    )
   if (route.kind === "home") return <Home tick={inboxTick} onOpen={(id) => navigate(`/s/${encodeURIComponent(id)}`)} />
   return <SessionView key={route.id} id={route.id} tick={sessionTicks[route.id] ?? 0} flush={flush} onHome={() => navigate("/")} />
 }
