@@ -1,6 +1,6 @@
 {
   "name": "@kitlangton/docket",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A keyboard-first local review queue for batches of pull requests, with verdicts an agent can act on",
   "keywords": [
     "code-review",
