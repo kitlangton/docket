@@ -571,7 +571,12 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
 
   // --- Verdict undo / redo (this session only).
   const applyVerdict = (id: string, value: VerdictValue, verb: string) => {
-    updateReview(id, (prev) => ({ ...prev, ...value }))
+    // Without a verdict, the reviewed head is the newest note's, as when a note is saved.
+    updateReview(id, (prev) => ({
+      ...prev,
+      ...value,
+      reviewedHead: value.verdict ? value.reviewedHead : prev.notes.findLast((note) => note.head)?.head,
+    }))
     if (id !== current) goTo(id)
     const label = entries.find((item) => item.id === id)?.pr
     say(`${verb} ${label ? itemLabel(label) : id}: ${value.verdict ?? "no verdict"}`)
@@ -988,7 +993,8 @@ function Deck(props: { session: SessionPayload; initial: ReviewState; base: stri
     },
     commandLine: openBar,
     summary: () => {
-      if (cursor && isCollapsed(cursor.file)) return unfold(cursor.file)
+      // A folded file opens first; a file with no lines has nothing to show, so it goes straight on.
+      if (cursor && cursor.kind !== "file" && isCollapsed(cursor.file)) return unfold(cursor.file)
       openSummary()
     },
     help: () => setHelp(true),
