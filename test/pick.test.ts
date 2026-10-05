@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { answerSummary, mediaPath, mediaResponse, resolvePick, toAnswer, validatePick } from "../src/pick"
+import { answerSummary, applyAnswer, EMPTY_PICK_STATE, mediaPath, mediaResponse, resolvePick, toAnswer, validatePick } from "../src/pick"
 
 let base: string
 let dir: string
@@ -78,6 +78,10 @@ describe("pick manifests", () => {
     expect(error).toContain("options[3]: needs media or a body")
     expect(error).toContain("options: duplicate id A")
     expect(error).toContain("previous: not a readable answer.json")
+    const mode = await validatePick({ title: "t", pick: "several", options: [{ body: "x" }] }, dir).catch((caught: Error) => caught.message)
+    expect(mode).toContain(`pick: expected "one" or "many"`)
+    expect((await validatePick({ title: "t", pick: "many", options: [{ body: "x" }] }, dir)).many).toBe(true)
+    expect((await validatePick({ title: "t", options: [{ body: "x" }] }, dir)).many).toBe(false)
   })
 
   test("resolves a session next to its manifest", async () => {
@@ -128,6 +132,7 @@ describe("answers", () => {
     outPath: "/m/answer.json",
     pick: {
       title: "t",
+      many: true,
       options: ["A", "B", "C"].map((id) => ({ id, label: id, media: [] })),
     },
   }
@@ -159,5 +164,36 @@ describe("answers", () => {
     expect(answer.picked).toEqual([])
     expect(answer.none).toBe(true)
     expect(answerSummary(answer)).toBe("none of these")
+  })
+})
+
+describe("answers given in chat", () => {
+  const session = (many: boolean) => ({
+    kind: "pick" as const,
+    id: "s",
+    manifestPath: "/m/pick.json",
+    statePath: "/m/pick.state.json",
+    outPath: "/m/answer.json",
+    pick: { title: "t", many, options: ["A", "B", "C"].map((id) => ({ id, label: id, media: [] })) },
+  })
+  const noted = { ...EMPTY_PICK_STATE, note: "kept", notes: [{ id: "n", option: "B", body: "pin", media: 0 }] }
+
+  test("matches ids loosely, keeps notes, and takes one pick unless many", () => {
+    const state = applyAnswer(session(false), noted, { picked: ["c"] })
+    expect(state).toMatchObject({ picked: ["C"], none: false, note: "kept" })
+    expect(state.notes).toHaveLength(1)
+    expect(applyAnswer(session(true), noted, { picked: ["B", "a"] }).picked).toEqual(["B", "A"])
+    expect(applyAnswer(session(false), noted, { none: true, note: "neither" })).toMatchObject({ picked: [], none: true, note: "neither" })
+  })
+
+  test("rejects unknown ids, extra picks, and empty answers", () => {
+    expect(() => applyAnswer(session(false), noted, { picked: ["Z"] })).toThrow("unknown option Z; options are A, B, C")
+    expect(() => applyAnswer(session(false), noted, { picked: ["A", "B"] })).toThrow("takes one option")
+    expect(() => applyAnswer(session(false), noted, { picked: ["A"], none: true })).toThrow("--none")
+    expect(() => applyAnswer(session(false), EMPTY_PICK_STATE, {})).toThrow("nothing to answer")
+  })
+
+  test("a single pick answers with the last one", () => {
+    expect(toAnswer(session(false), { ...EMPTY_PICK_STATE, picked: ["A", "C"] }).picked).toEqual(["C"])
   })
 })

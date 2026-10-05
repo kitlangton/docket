@@ -201,6 +201,8 @@ export type PickOption = { id: string; label: string; why?: string; body?: strin
 /** A pick manifest after validation: ids, labels, and media kinds filled in. */
 export type PickManifest = {
   title: string
+  /** `"pick": "many"` in the manifest: several picks, in rank order. Otherwise one pick replaces another. */
+  many: boolean
   question?: string
   baseline?: PickMedia
   options: PickOption[]
@@ -228,7 +230,8 @@ export function mediaUrl(session: string, src: string) {
   return `/api/s/${encodeURIComponent(session)}/media/${src.split("/").map(encodeURIComponent).join("/")}`
 }
 
-export type PickPayload = { id: string; kind: "pick"; pick: PickManifest; outPath: string }
+/** `answer` is present once the pick has been answered, from the page or with `docket answer`. */
+export type PickPayload = { id: string; kind: "pick"; pick: PickManifest; outPath: string; answer?: PickAnswer }
 
 /** Identifies a docket server at /api/health, so an unrelated process on the port isn't mistaken for one. */
 export const APP_ID = "docket"

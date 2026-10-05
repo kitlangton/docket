@@ -15,6 +15,7 @@ Usage:
   docket --author @me [--label x] [--state open]
   docket <ref> | docket <base>..<head>   local branch or range
   docket pick <manifest.json>        choose between options; writes answer.json
+  docket answer <id|url> [--pick A] [--none] [--note "…"]   record an answer given in chat
   docket open                        open the inbox
   docket server status|stop|restart  manage the background server
 
@@ -44,6 +45,9 @@ const args = parseArgs({
     open: { type: "boolean", default: true },
     refresh: { type: "boolean", default: false },
     timeout: { type: "string" },
+    pick: { type: "string", multiple: true },
+    none: { type: "boolean", default: false },
+    note: { type: "string" },
     help: { type: "boolean", short: "h", default: false },
     // Accepted and ignored: servers spawned by older clients still pass it.
     "idle-ms": { type: "string" },
@@ -60,6 +64,7 @@ if (args.values.help) {
 if (command === "server") await serverCommand(subcommand)
 else if (command === "open" && args.positionals.length === 1) await openInbox()
 else if (command === "pick") await pick()
+else if (command === "answer") await answer()
 else await review()
 
 async function review() {
@@ -80,6 +85,31 @@ async function pick() {
   const timeout = args.values.timeout === undefined ? undefined : parseDuration(args.values.timeout)
   if (timeout === undefined && args.values.timeout !== undefined) fail(`--timeout: expected a duration like 90s, 10m, or 1h`)
   await runSession(resolvePick(resolve(path), args.values.out), timeout)
+}
+
+/** Records an answer given outside the page, exactly as if it were sent there. */
+async function answer() {
+  const target = args.positionals[1]
+  if (!target || args.positionals.length > 2) {
+    console.log(USAGE)
+    process.exit(1)
+  }
+  const id = decodeURIComponent(target.match(/\/s\/([^/?#]+)/)?.[1] ?? target)
+  const running = await health(port).catch(fail)
+  if (!running) fail(`no docket server on port ${port}`)
+  const picked = (args.values.pick ?? [])
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const res = await fetch(`http://127.0.0.1:${port}/api/s/${encodeURIComponent(id)}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ picked, none: args.values.none, note: args.values.note }),
+  }).catch(fail)
+  const body: { error?: string; path?: string; answer?: PickAnswer } = await res.json().catch(() => ({}))
+  if (res.status === 404) fail(`no pick session ${id}`)
+  if (!res.ok || !body.answer) fail(body.error ?? `answer failed: ${res.status}`)
+  console.log(`docket: ${answerSummary(body.answer)}`)
+  console.log(`answer: ${body.path}`)
 }
 
 /** Registers the session, prints its links, and blocks until it is handed back, closed, or times out. */

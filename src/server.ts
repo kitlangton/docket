@@ -4,7 +4,7 @@ import index from "../web/index.html"
 import { fileAt, interdiff, loadAll, manifestItems, readCache } from "./load"
 import { writeAtomic } from "./files"
 import { tailnetUrl } from "./tailnet"
-import { EMPTY_PICK_STATE, mediaPath, mediaResponse, toAnswer } from "./pick"
+import { applyAnswer, EMPTY_PICK_STATE, mediaPath, mediaResponse, toAnswer } from "./pick"
 import { dataHome } from "./session"
 import { readState, toVerdicts } from "./state"
 import {
@@ -162,6 +162,31 @@ export async function serve(options: ServerOptions) {
   }
   const notFound = () => Response.json({ error: "unknown session" }, { status: 404 })
 
+  /** Hands a session back: writes its state and result, wakes waiting clients, and tells tabs. */
+  const finish = async (found: { id: string; entry: Entry }, body: unknown) => {
+    const { session: s } = found.entry
+    const event: WaitEvent =
+      s.kind === "pick"
+        ? { type: "answer", answer: toAnswer(s, body as PickState), outPath: s.outPath }
+        : {
+            type: "handback",
+            verdicts: toVerdicts(s.manifestPath, s.manifest, runtime(found.id)?.items ?? {}, body as ReviewState),
+            outPath: s.outPath,
+          }
+    const result = event.type === "answer" ? event.answer : event.type === "handback" ? event.verdicts : undefined
+    await Promise.all([
+      writeAtomic(s.statePath, JSON.stringify(body, null, 2)),
+      writeAtomic(s.outPath, JSON.stringify(result, null, 2) + "\n"),
+    ])
+    found.entry.handedBackAt = new Date().toISOString()
+    await saveIndex()
+    notifyWaiters(found.id, event)
+    broadcast({ type: "inbox" })
+    // Open pick pages refetch and show the answer, wherever it came from.
+    if (s.kind === "pick") broadcast({ type: "session", id: found.id, version: Date.now() })
+    return Response.json({ ok: true, path: s.outPath, answer: event.type === "answer" ? event.answer : undefined })
+  }
+
   const server = Bun.serve({
     port: options.port,
     hostname: "127.0.0.1",
@@ -239,12 +264,22 @@ export async function serve(options: ServerOptions) {
         },
       },
       "/api/s/:id/session": {
-        GET: (req) => {
+        GET: async (req) => {
           const found = session(req)
           if (!found) return notFound()
           const s = found.entry.session
           if (s.kind === "pick")
-            return Response.json({ id: found.id, kind: "pick", pick: s.pick, outPath: s.outPath } satisfies PickPayload)
+            return Response.json({
+              id: found.id,
+              kind: "pick",
+              pick: s.pick,
+              outPath: s.outPath,
+              answer: found.entry.handedBackAt
+                ? await Bun.file(s.outPath)
+                    .json()
+                    .catch(() => undefined)
+                : undefined,
+            } satisfies PickPayload)
           const loaded = runtime(found.id)
           if (!loaded) return notFound()
           const payload: SessionPayload = { id: found.id, manifest: s.manifest, outPath: s.outPath, items: loaded.items }
@@ -354,26 +389,21 @@ export async function serve(options: ServerOptions) {
         POST: async (req) => {
           const found = session(req)
           if (!found) return notFound()
-          const { session: s } = found.entry
-          const body: unknown = await req.json()
-          const event: WaitEvent =
-            s.kind === "pick"
-              ? { type: "answer", answer: toAnswer(s, body as PickState), outPath: s.outPath }
-              : {
-                  type: "handback",
-                  verdicts: toVerdicts(s.manifestPath, s.manifest, runtime(found.id)?.items ?? {}, body as ReviewState),
-                  outPath: s.outPath,
-                }
-          const result = event.type === "answer" ? event.answer : event.type === "handback" ? event.verdicts : undefined
-          await Promise.all([
-            writeAtomic(s.statePath, JSON.stringify(body, null, 2)),
-            writeAtomic(s.outPath, JSON.stringify(result, null, 2) + "\n"),
-          ])
-          found.entry.handedBackAt = new Date().toISOString()
-          await saveIndex()
-          notifyWaiters(found.id, event)
-          broadcast({ type: "inbox" })
-          return Response.json({ ok: true, path: s.outPath })
+          return finish(found, await req.json())
+        },
+      },
+      // `docket answer`: an answer given in chat, applied as if it were sent from the page.
+      "/api/s/:id/answer": {
+        POST: async (req) => {
+          const found = session(req)
+          const s = found?.entry.session
+          if (!found || s?.kind !== "pick") return notFound()
+          const given: { picked?: string[]; none?: boolean; note?: string } = await req.json()
+          try {
+            return await finish(found, applyAnswer(s, await readState<PickState>(s.statePath, EMPTY_PICK_STATE), given))
+          } catch (error) {
+            return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
+          }
         },
       },
       "/api/s/:id/close": {

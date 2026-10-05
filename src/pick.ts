@@ -8,6 +8,7 @@ type RawMedia = string | { src?: string; light?: string; dark?: string; label?: 
 
 type RawManifest = {
   title?: unknown
+  pick?: unknown
   question?: unknown
   baseline?: RawMedia
   options?: { id?: unknown; label?: unknown; why?: unknown; body?: unknown; media?: RawMedia[] }[]
@@ -79,10 +80,11 @@ export async function validatePick(raw: RawManifest, root: string): Promise<Pick
   const ids = options.map((option) => option.id)
   ids.filter((id, index) => ids.indexOf(id) !== index).forEach((id) => errors.push(`options: duplicate id ${id}`))
   const baseline = raw.baseline === undefined ? undefined : await resolveMedia(raw.baseline, root, "baseline", errors)
+  if (raw.pick !== undefined && raw.pick !== "one" && raw.pick !== "many") errors.push(`pick: expected "one" or "many"`)
   const previousPath = text(raw.previous, "previous")
   const previous = previousPath ? await readPrevious(resolve(root, previousPath), errors) : undefined
   if (errors.length) throw new Error(`invalid pick manifest:\n  ${errors.join("\n  ")}`)
-  return { title: title!, question: text(raw.question, "question"), baseline, options, previous }
+  return { title: title!, many: raw.pick === "many", question: text(raw.question, "question"), baseline, options, previous }
 }
 
 async function resolveMedia(entry: RawMedia, root: string, where: string, errors: string[]): Promise<PickMedia | undefined> {
@@ -185,17 +187,35 @@ export async function mediaResponse(path: string, req: Request) {
   })
 }
 
-/** The answer agents read: picks in rank order, the overall note, and per-option notes without their ids. */
+/** The answer agents read: picks in rank order (at most one unless the manifest allows many), the overall note, and per-option notes without their ids. */
 export function toAnswer(session: PickSession, state: PickState): PickAnswer {
   const ids = new Set(session.pick.options.map((option) => option.id))
+  const picked = state.none ? [] : state.picked.filter((id) => ids.has(id))
   return {
     session: session.manifestPath,
     answeredAt: new Date().toISOString(),
-    picked: state.none ? [] : state.picked.filter((id) => ids.has(id)),
+    picked: session.pick.many ? picked : picked.slice(-1),
     none: state.none,
     note: state.note,
     notes: state.notes.filter((note) => ids.has(note.option)).map(({ id: _, ...note }) => note),
   }
+}
+
+/**
+ * Applies an answer given outside the page (`docket answer`) to the saved state, keeping its per-option notes.
+ * Option ids match case-insensitively; an unknown id, or several picks where only one is allowed, is an error.
+ */
+export function applyAnswer(session: PickSession, state: PickState, given: { picked?: string[]; none?: boolean; note?: string }) {
+  const options = session.pick.options
+  const picked = (given.picked ?? []).map((id) => {
+    const option = options.find((candidate) => candidate.id.toLowerCase() === id.toLowerCase())
+    if (!option) throw new Error(`unknown option ${id}; options are ${options.map((candidate) => candidate.id).join(", ")}`)
+    return option.id
+  })
+  if (picked.length > 1 && !session.pick.many) throw new Error(`this pick takes one option; got ${picked.join(", ")}`)
+  if (given.none && picked.length) throw new Error("--none can't be combined with --pick")
+  if (!picked.length && !given.none && !given.note) throw new Error("nothing to answer: give --pick, --none, or --note")
+  return { ...state, picked, none: Boolean(given.none), note: given.note ?? state.note } satisfies PickState
 }
 
 /** "picked B, A" or "none of these", for the CLI and the inbox. */
