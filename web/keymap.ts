@@ -3,7 +3,7 @@
  * (`bun run keys` regenerates it), so the three cannot drift.
  */
 
-export type Mode = "normal" | "visual" | "note" | "summary" | "home" | "tree" | "pick" | "grid"
+export type Mode = "normal" | "visual" | "note" | "summary" | "home" | "tree" | "grid" | "flip"
 export type Group = "Navigate" | "Review" | "Folds" | "Commands" | "Inbox" | "Pick"
 
 export type Action =
@@ -83,9 +83,9 @@ export type Action =
   | "pickJump"
   | "pickMediaNext"
   | "pickMediaPrev"
-  | "pickGrid"
+  | "pickUp"
+  | "pickDown"
   | "pickOpen"
-  | "pickSide"
   | "pickTheme"
   | "pickBaseline"
   | "pickPlay"
@@ -194,7 +194,7 @@ export const KEYMAP: Binding[] = [
     action: "help",
     label: "Toggle this help",
     group: "Commands",
-    modes: ["normal", "visual", "note", "summary", "home", "tree", "pick", "grid"],
+    modes: ["normal", "visual", "note", "summary", "home", "tree", "grid", "flip"],
   },
   { keys: ["Escape"], action: "cancel", label: "Cancel pending key or selection", group: "Commands", modes: ["normal", "note"] },
 
@@ -210,32 +210,32 @@ export const KEYMAP: Binding[] = [
   { keys: ["Enter", "o"], action: "homeOpen", label: "Open session", group: "Inbox", modes: ["home"] },
   { keys: ["d"], action: "homeArchive", label: "Archive a session that isn't waiting", group: "Inbox", modes: ["home"] },
 
-  { keys: ["h", "ArrowLeft"], action: "pickPrev", label: "Previous option", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["l", "ArrowRight"], action: "pickNext", label: "Next option", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["k", "ArrowUp"], action: "pickPrev", label: "Previous option", group: "Pick", modes: ["grid"], hidden: true },
-  { keys: ["j", "ArrowDown"], action: "pickNext", label: "Next option", group: "Pick", modes: ["grid"], hidden: true },
-  { keys: [..."123456789"], display: "1–9", action: "pickJump", label: "Option by number", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["j", "ArrowDown"], action: "pickMediaNext", label: "Next media item of the option", group: "Pick", modes: ["pick"] },
-  { keys: ["k", "ArrowUp"], action: "pickMediaPrev", label: "Previous media item of the option", group: "Pick", modes: ["pick"] },
-  { keys: ["g"], action: "pickGrid", label: "Grid overview", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["Enter", "o"], action: "pickOpen", label: "Open the option", group: "Pick", modes: ["grid"] },
-  { keys: ["v"], action: "pickSide", label: "Side by side with the next option", group: "Pick", modes: ["pick"] },
-  { keys: ["t"], action: "pickTheme", label: "Light / dark", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["b"], action: "pickBaseline", label: "Hold to show the baseline", group: "Pick", modes: ["pick"] },
-  { keys: ["Space"], action: "pickPlay", label: "Pause / play videos", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["p", "Enter"], action: "pickToggle", label: "Pick or unpick; pick order is the ranking", group: "Pick", modes: ["pick"] },
+  { keys: ["h", "ArrowLeft"], action: "pickPrev", label: "Previous option", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["l", "ArrowRight"], action: "pickNext", label: "Next option", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["k", "ArrowUp"], action: "pickUp", label: "Option above", group: "Pick", modes: ["grid"] },
+  { keys: ["j", "ArrowDown"], action: "pickDown", label: "Option below", group: "Pick", modes: ["grid"] },
+  { keys: ["Enter", "o"], action: "pickOpen", label: "Open the option full size", group: "Pick", modes: ["grid"] },
+  { keys: [..."123456789"], display: "1–9", action: "pickJump", label: "Open option by number", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["j", "ArrowDown"], action: "pickMediaNext", label: "Next media item", group: "Pick", modes: ["flip"] },
+  { keys: ["k", "ArrowUp"], action: "pickMediaPrev", label: "Previous media item", group: "Pick", modes: ["flip"] },
+  { keys: ["g", "Escape"], action: "pickBack", label: "Back to the grid", group: "Pick", modes: ["flip"] },
+  { keys: ["p"], action: "pickToggle", label: "Pick or unpick", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["Enter"], action: "pickToggle", label: "Pick or unpick", group: "Pick", modes: ["flip"], hidden: true },
+  { keys: ["t"], action: "pickTheme", label: "Dark / light stills", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["b"], action: "pickBaseline", label: "Hold to show the baseline", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["Space"], action: "pickPlay", label: "Pause / play videos", group: "Pick", modes: ["grid", "flip"] },
   {
     keys: ["c"],
     action: "pickNote",
-    label: "Note on the option: click the image to pin it; on a video it stamps the time",
+    label: "Note on the option: click a still to pin it; on a video it stamps the time",
     group: "Pick",
-    modes: ["pick"],
+    modes: ["grid", "flip"],
   },
-  { keys: ["C"], action: "pickOverall", label: "Overall note", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["0"], action: "pickNone", label: "None of these", group: "Pick", modes: ["pick", "grid"] },
-  { keys: [":"], action: "pickCommand", label: "Command line (:w submit, :q close)", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["Z Z"], action: "pickSubmit", label: "Submit", group: "Pick", modes: ["pick", "grid"] },
-  { keys: ["Escape"], action: "pickBack", label: "Back to one option", group: "Pick", modes: ["pick", "grid"] },
+  { keys: ["C"], action: "pickOverall", label: "Notes for the whole pick", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["0"], action: "pickNone", label: "None of these", group: "Pick", modes: ["grid", "flip"] },
+  { keys: [":"], action: "pickCommand", label: "Command line (:w send, :q close)", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["Z Z"], action: "pickSubmit", label: "Send", group: "Pick", modes: ["grid", "flip"] },
+  { keys: ["Escape"], action: "pickBack", label: "Cancel a pin", group: "Pick", modes: ["grid"], hidden: true },
 ]
 
 export const GROUPS: Group[] = ["Navigate", "Review", "Folds", "Commands", "Inbox", "Pick"]

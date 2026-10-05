@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useRef, useState, type RefObject, type TouchEvent } from "react"
-import type { PickNote, PickOption, PickPayload, PickPosition, PickState } from "../src/types"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject, type TouchEvent } from "react"
+import type { PickAnswer, PickNote, PickOption, PickPayload, PickPosition, PickState } from "../src/types"
 import { feed, keyName, type Action, type Pending } from "./keymap"
 import { Markdown } from "./markdown"
-import { formatTime, MediaView, Thumb, type Pin, type Playback, type Theme } from "./pick-media"
+import { CardMedia, formatTime, MediaView, type Pin, type Playback, type Theme } from "./pick-media"
 import { CommandBar, Help, Prompt } from "./views"
 
-type View = "flip" | "grid" | "side"
-type NotePrompt = { kind: "note"; option: string; media: number; at?: PickPosition; noteId?: string; initial: string }
-type PromptState = NotePrompt | { kind: "overall" }
+type View = "grid" | "flip"
+type NotePrompt = { option: string; media: number; at?: PickPosition; noteId?: string; initial: string }
 
 const EMPTY_PENDING: Pending = { count: "", keys: [] }
 
-/** A pick session: flip through options, compare, pick in rank order, leave notes, submit. */
+/**
+ * A pick session: a grid of option cards (flip view for one option at a time), a Dark/Light switch for the stills,
+ * Pick on each card, and a bottom bar with the overall notes and Send.
+ */
 export function PickDeck(props: {
   payload: PickPayload
   initial: PickState
@@ -22,7 +24,7 @@ export function PickDeck(props: {
   const { pick, id: session } = props.payload
   const options = pick.options
   const [state, setState] = useState<PickState>(() => ({ ...props.initial, current: Math.min(props.initial.current, options.length - 1) }))
-  const [view, setView] = useState<View>("flip")
+  const [view, setView] = useState<View>("grid")
   const [mediaIndex, setMediaIndex] = useState<Record<string, number>>({})
   const [theme, setTheme] = useState<Theme>(() =>
     (localStorage.getItem("docket.pickTheme") ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark"
@@ -32,18 +34,21 @@ export function PickDeck(props: {
   const [baseline, setBaseline] = useState(false)
   const [playing, setPlaying] = useState(true)
   const [armed, setArmed] = useState(false)
-  const [immersive, setImmersive] = useState(false)
-  const [prompt, setPrompt] = useState<PromptState | null>(null)
+  const [prompt, setPrompt] = useState<NotePrompt | null>(null)
   const [bar, setBar] = useState<string | null>(null)
   const [help, setHelp] = useState(false)
-  const [answered, setAnswered] = useState<string | null>(null)
+  const [sent, setSent] = useState(false)
+  const [keyboard, setKeyboard] = useState(false)
   const [message, setMessage] = useState<{ text: string } | null>(null)
-  const [pending, setPending] = useState("")
   const pendingRef = useRef<Pending>(EMPTY_PENDING)
   const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const notesRef = useRef<HTMLTextAreaElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
   const time = useRef(0)
   const playback: Playback = { time, playing }
 
+  const answer: PickAnswer | undefined = props.payload.answer
+  const picked = answer ? answer.picked : state.none ? [] : state.picked
   const option = options[state.current]!
   const index = Math.min(mediaIndex[option.id] ?? 0, Math.max(0, option.media.length - 1))
   const media = option.media[index]
@@ -84,47 +89,63 @@ export function PickDeck(props: {
     }
   }, [save, props.flush])
 
-  const goTo = (next: number) => {
+  // The focused card stays in view as the focus ring moves.
+  useEffect(() => {
+    if (view === "grid" && keyboard) gridRef.current?.querySelector(".pick-card.is-focused")?.scrollIntoView({ block: "nearest" })
+  }, [state.current, view, keyboard])
+
+  const focus = (next: number) => {
     setArmed(false)
     setState((prev) => ({ ...prev, current: (next + options.length) % options.length }))
   }
-  const step = (delta: number) => goTo(state.current + delta)
+  const open = (at: number, item = 0) => {
+    focus(at)
+    setMediaIndex((prev) => ({ ...prev, [options[at]!.id]: item }))
+    setView("flip")
+    window.scrollTo({ top: 0 })
+  }
+  // Rows in the grid: how many cards sit side by side right now.
+  const columns = () => {
+    const template = gridRef.current ? getComputedStyle(gridRef.current).gridTemplateColumns : ""
+    return Math.max(1, template.split(" ").filter(Boolean).length)
+  }
   const stepMedia = (delta: number) => {
-    if (option.media.length < 2) return say("One media item")
+    if (option.media.length < 2) return
     setMediaIndex((prev) => ({ ...prev, [option.id]: (index + delta + option.media.length) % option.media.length }))
   }
-  const togglePick = (id: string) =>
-    setState((prev) => ({
-      ...prev,
-      none: false,
-      picked: prev.picked.includes(id) ? prev.picked.filter((item) => item !== id) : [...prev.picked, id],
-    }))
+  const togglePick = (id: string) => {
+    if (answer) return
+    setState((prev) => {
+      const has = prev.picked.includes(id)
+      const next = pick.many ? (has ? prev.picked.filter((item) => item !== id) : [...prev.picked, id]) : has ? [] : [id]
+      return { ...prev, none: false, picked: next }
+    })
+  }
   const toggleNone = () => {
+    if (answer) return
     const none = !state.none
     setState((prev) => ({ ...prev, none, picked: none ? [] : prev.picked }))
-    if (none) setPrompt({ kind: "overall" })
+    if (none) notesRef.current?.focus()
   }
-  const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark"
+  const toggleTheme = (next: Theme = theme === "dark" ? "light" : "dark") => {
     localStorage.setItem("docket.pickTheme", next)
     setTheme(next)
   }
 
-  /** `c`: arms a pin on an image (a second `c` skips the pin), stamps a video's time, or just opens the note. */
+  /** `c`: on a card or a still in flip view, arms a pin (a second `c` skips it); on a video, stamps the time. */
   const startNote = () => {
-    if (view === "flip" && media?.kind === "image" && !armed) {
+    const stills = view === "flip" ? media?.kind === "image" : option.media.some((item) => item.kind === "image")
+    if (stills && !armed) {
       setArmed(true)
-      return say("Click to pin")
+      return say("Click a still to pin")
     }
     setArmed(false)
     const at = view === "flip" && media?.kind === "video" ? { t: Math.round(time.current * 10) / 10 } : undefined
-    setPrompt({ kind: "note", option: option.id, media: index, at, initial: "" })
+    setPrompt({ option: option.id, media: view === "flip" ? index : 0, at, initial: "" })
   }
-  const pinAt = (at: PickPosition, touch: boolean) => {
-    // On a phone a tap goes fullscreen unless a note is armed; with a mouse, a click pins.
-    if (touch && !armed) return setImmersive((value) => !value)
+  const pinAt = (target: PickOption, item: number, at: PickPosition) => {
     setArmed(false)
-    setPrompt({ kind: "note", option: option.id, media: index, at, initial: "" })
+    setPrompt({ option: target.id, media: item, at, initial: "" })
   }
   const saveNote = (target: NotePrompt, body: string) =>
     setState((prev) => {
@@ -140,13 +161,14 @@ export function PickDeck(props: {
       return { ...prev, notes: target.noteId ? prev.notes.map((item) => (item.id === target.noteId ? note : item)) : [...others, note] }
     })
   const editNote = (note: PickNote) =>
-    setPrompt({ kind: "note", option: note.option, media: note.media, at: note.at, noteId: note.id, initial: note.body })
+    setPrompt({ option: note.option, media: note.media, at: note.at, noteId: note.id, initial: note.body })
 
+  const canSend = !answer && (picked.length > 0 || state.none || state.note.trim().length > 0)
   const submit = async () => {
+    if (!canSend) return say(answer ? "Already sent" : "Pick an option or write a note")
     const res = await fetch(`${props.base}/handback`, { method: "POST", body: JSON.stringify(state) })
-    if (!res.ok) return say("Couldn't submit")
-    const body: { path: string } = await res.json()
-    setAnswered(body.path)
+    if (!res.ok) return say("Couldn't send")
+    setSent(true)
   }
   const close = async () => {
     await fetch(`${props.base}/close`, { method: "POST", body: JSON.stringify(state) })
@@ -161,44 +183,34 @@ export function PickDeck(props: {
   }
 
   const actions: Partial<Record<Action, (key: string) => void>> = {
-    pickPrev: () => step(-1),
-    pickNext: () => step(1),
+    pickPrev: () => focus(state.current - 1),
+    pickNext: () => focus(state.current + 1),
+    pickUp: () => focus(Math.max(0, state.current - columns())),
+    pickDown: () => focus(Math.min(options.length - 1, state.current + columns())),
+    pickOpen: () => open(state.current, index),
     pickJump: (key) => {
       const target = Number(key) - 1
-      if (target < options.length) goTo(target)
-      if (view === "grid") setView("flip")
+      if (target < options.length) open(target)
     },
     pickMediaNext: () => stepMedia(1),
     pickMediaPrev: () => stepMedia(-1),
-    pickGrid: () => setView(view === "grid" ? "flip" : "grid"),
-    pickOpen: () => setView("flip"),
-    pickSide: () => {
-      if (options.length < 2) return say("Only one option")
-      setView(view === "side" ? "flip" : "side")
+    pickBack: () => {
+      if (armed) return setArmed(false)
+      setView("grid")
     },
-    pickTheme: toggleTheme,
+    pickToggle: () => togglePick(option.id),
+    pickTheme: () => toggleTheme(),
     pickBaseline: () => {
       if (!pick.baseline) return say("No baseline")
       setBaseline(true)
     },
     pickPlay: () => setPlaying((value) => !value),
-    pickToggle: () => togglePick(option.id),
     pickNote: startNote,
-    pickOverall: () => setPrompt({ kind: "overall" }),
+    pickOverall: () => notesRef.current?.focus(),
     pickNone: toggleNone,
     pickCommand: () => setBar(""),
     pickSubmit: () => void submit(),
-    pickBack: () => {
-      if (armed) return setArmed(false)
-      if (immersive) return setImmersive(false)
-      setView("flip")
-    },
     help: () => setHelp(true),
-  }
-
-  const setPendingKeys = (next: Pending) => {
-    pendingRef.current = next
-    setPending(next.count + next.keys.join(""))
   }
   const runKey = (action: Action, key: string) => actions[action]?.(key)
   const runLatest = useRef(runKey)
@@ -206,42 +218,52 @@ export function PickDeck(props: {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return
-      if (event.metaKey || event.altKey || prompt || bar !== null || answered) return
+      if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) {
+        if (event.key === "Escape") (event.target as HTMLElement).blur()
+        return
+      }
+      if (event.metaKey || event.altKey || prompt || bar !== null) return
       const key = keyName(event)
       if (["Shift", "Control", "Alt", "Meta"].includes(key)) return
       clearTimeout(pendingTimer.current)
+      setKeyboard(true)
       if (help) {
         event.preventDefault()
         if (key === "?" || key === "Escape" || key === "q") setHelp(false)
         return
       }
-      const result = feed(pendingRef.current, key, [view === "grid" ? "grid" : "pick"])
-      if (result.kind === "none") return setPendingKeys(EMPTY_PENDING)
+      const result = feed(pendingRef.current, key, [view])
+      if (result.kind === "none") {
+        pendingRef.current = EMPTY_PENDING
+        return
+      }
       event.preventDefault()
       if (result.kind === "run") {
-        setPendingKeys(EMPTY_PENDING)
+        pendingRef.current = EMPTY_PENDING
         if (!event.repeat || result.binding.action !== "pickBaseline") runKey(result.binding.action, key)
         return
       }
-      setPendingKeys(result.pending)
+      pendingRef.current = result.pending
       pendingTimer.current = setTimeout(() => {
-        setPendingKeys(EMPTY_PENDING)
+        pendingRef.current = EMPTY_PENDING
         if (result.fallback) runLatest.current(result.fallback.binding.action, key)
       }, result.timeout)
     }
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.key === "b") setBaseline(false)
     }
+    const onPointer = () => setKeyboard(false)
     window.addEventListener("keydown", onKey)
     window.addEventListener("keyup", onKeyUp)
+    window.addEventListener("pointerdown", onPointer)
     return () => {
       window.removeEventListener("keydown", onKey)
       window.removeEventListener("keyup", onKeyUp)
+      window.removeEventListener("pointerdown", onPointer)
     }
   })
 
-  // Swipes flip options on a phone.
+  // Swipes flip options in the flip view on a phone.
   const touch = useRef<{ x: number; y: number } | null>(null)
   const swipe = {
     onTouchStart: (event: TouchEvent) => {
@@ -254,177 +276,209 @@ export function PickDeck(props: {
       touch.current = null
       if (!start || !point) return
       const dx = point.clientX - start.x
-      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(point.clientY - start.y) * 1.5) step(dx < 0 ? 1 : -1)
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(point.clientY - start.y) * 1.5) focus(state.current + (dx < 0 ? 1 : -1))
     },
   }
 
-  if (answered) return <Answered path={answered} state={state} onHome={props.onHome} />
-
-  const rank = (id: string) => state.picked.indexOf(id) + 1
+  const rank = (id: string) => picked.indexOf(id) + 1
   const optionNotes = (id: string) => state.notes.filter((note) => note.option === id)
   const pinsFor = (target: PickOption, at: number): Pin[] =>
     optionNotes(target.id).flatMap((note, n) => (note.media === at && note.at && "x" in note.at ? [{ n: n + 1, ...note.at }] : []))
-  const shown = baseline && pick.baseline ? pick.baseline : media
 
-  const stage = (target: PickOption, at: number, primary: boolean) => {
-    const item = primary ? shown : target.media[at]
-    return (
-      <div className="pick-stage-item">
-        {item ? (
-          <div className="pick-media">
-            <MediaView
-              session={session}
-              base={props.base}
-              media={item}
-              theme={theme}
-              playback={playback}
-              pins={baseline && primary ? [] : pinsFor(target, at)}
-              armed={primary && armed}
-              onPin={primary && !baseline ? pinAt : undefined}
-            />
-          </div>
-        ) : null}
-        {target.body && (!item || item.kind !== "text") ? <Markdown source={target.body} className="pick-body" /> : null}
-      </div>
-    )
-  }
+  const pickButton = (target: PickOption) => (
+    <button
+      className={`pick-button${rank(target.id) ? " is-on" : ""}`}
+      disabled={Boolean(answer)}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => togglePick(target.id)}
+    >
+      {pick.many && rank(target.id) ? `Pick ${rank(target.id)}` : "Pick"}
+    </button>
+  )
+  const noteButton = (target: PickOption, at: number) => (
+    <button
+      className={`pick-note-button${armed && option.id === target.id ? " is-on" : ""}`}
+      title="Note"
+      aria-label="Note"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => {
+        focus(at)
+        if (target.media.some((item) => item.kind === "image") && !(armed && option.id === target.id)) {
+          setArmed(true)
+          return say("Click a still to pin")
+        }
+        setArmed(false)
+        setPrompt({ option: target.id, media: 0, initial: "" })
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+        <path d="M2.5 3.5h9v6h-5l-3 2.5v-2.5h-1z" />
+      </svg>
+    </button>
+  )
+  const notesList = (target: PickOption) =>
+    optionNotes(target.id).length ? (
+      <ol className="pick-notes">
+        {optionNotes(target.id).map((note) => (
+          <li key={note.id} onClick={() => editNote(note)}>
+            {note.at && "t" in note.at ? <span className="pick-note-at">{formatTime(note.at.t)}</span> : null}
+            {note.body}
+          </li>
+        ))}
+      </ol>
+    ) : null
 
   return (
-    <div className={`pick${immersive ? " is-immersive" : ""}`}>
-      <header className="pick-head">
-        <button className="rail-home" onMouseDown={(event) => event.preventDefault()} onClick={props.onHome} title="Inbox">
-          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-            <path d="M7.5 2.5L4 6l3.5 3.5" />
-          </svg>
-        </button>
-        <div className="pick-title">
-          <h1>{pick.title}</h1>
-          {pick.question ? <Markdown source={pick.question} className="pick-question" /> : null}
-        </div>
-        <nav className="pick-strip">
-          {options.map((item, at) => (
-            <button
-              key={item.id}
-              className={`pick-tab${at === state.current ? " is-current" : ""}${rank(item.id) ? " is-picked" : ""}`}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => goTo(at)}
-              title={item.label}
-            >
-              {item.id}
-              {rank(item.id) ? <span className="pick-rank">{rank(item.id)}</span> : null}
+    <div className={`pick is-${view}`}>
+      <div className="pick-page-inner">
+        <header className="pick-top">
+          {view === "flip" ? (
+            <button className="pick-back" onClick={() => setView("grid")} aria-label="Back to the grid">
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+                <path d="M7.5 2.5L4 6l3.5 3.5" />
+              </svg>
             </button>
-          ))}
-        </nav>
-        <button className="pick-submit" onMouseDown={(event) => event.preventDefault()} onClick={() => void submit()}>
-          Submit
-        </button>
-      </header>
-      {pick.previous ? <Previous previous={pick.previous} /> : null}
-
-      {view === "grid" ? (
-        <div className="pick-grid">
-          {options.map((item, at) => (
-            <button
-              key={item.id}
-              className={`pick-card${at === state.current ? " is-current" : ""}`}
-              onClick={() => {
-                goTo(at)
-                setView("flip")
-              }}
-            >
-              <Thumb session={session} media={item.media[0]} body={item.body} theme={theme} />
-              <span className="pick-card-label">
-                <span className="pick-id">{item.id}</span>
-                {item.label}
-                {rank(item.id) ? <span className="pick-rank">{rank(item.id)}</span> : null}
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : view === "side" ? (
-        <div className="pick-side" {...swipe}>
-          {[option, options[(state.current + 1) % options.length]!].map((item, at) => (
-            <section key={item.id} className="pick-side-pane">
-              <div className="pick-side-label">
-                <span className="pick-id">{item.id}</span>
-                {item.label}
-                {rank(item.id) ? <span className="pick-rank">{rank(item.id)}</span> : null}
-              </div>
-              {stage(item, at === 0 ? index : 0, at === 0)}
-            </section>
-          ))}
-        </div>
-      ) : (
-        <div className="pick-stage" {...swipe}>
-          {stage(option, index, true)}
-        </div>
-      )}
-
-      {view === "grid" ? null : (
-        <div className="pick-caption">
-          <span className="pick-id">{baseline ? "Before" : option.id}</span>
-          <span className="pick-label">{baseline ? (pick.baseline?.label ?? "") : option.label}</span>
-          {option.media.length > 1 ? (
-            <span className="pick-dots" aria-label={`${index + 1} of ${option.media.length}`}>
-              {option.media.map((item, at) => (
-                <span key={at} className={at === index ? "is-current" : undefined} title={item.label} />
-              ))}
+          ) : null}
+          <h1>{view === "flip" ? `${option.id} · ${option.label}` : pick.title}</h1>
+          {view === "flip" ? (
+            <span className="pick-top-actions">
+              {noteButton(option, state.current)}
+              {pickButton(option)}
             </span>
           ) : null}
-          {option.why ? <Markdown source={option.why} className="pick-why" /> : null}
-          {optionNotes(option.id).length ? (
-            <ol className="pick-notes">
-              {optionNotes(option.id).map((note) => (
-                <li key={note.id} onClick={() => editNote(note)}>
-                  {note.at && "t" in note.at ? <span className="pick-note-at">{formatTime(note.at.t)}</span> : null}
-                  {note.body}
-                </li>
-              ))}
-            </ol>
-          ) : null}
+        </header>
+        {view === "grid" && pick.question ? <Markdown source={pick.question} className="pick-question" /> : null}
+        {view === "grid" && pick.previous ? <Previous previous={pick.previous} /> : null}
+        <div className="seg" role="tablist">
+          {(["dark", "light"] as const).map((scheme) => (
+            <button
+              key={scheme}
+              role="tab"
+              aria-selected={theme === scheme}
+              className={theme === scheme ? "on" : undefined}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => toggleTheme(scheme)}
+            >
+              {scheme === "dark" ? "Dark" : "Light"}
+            </button>
+          ))}
         </div>
-      )}
 
-      <div className="pick-actions">
-        <button className={rank(option.id) ? "is-on" : undefined} onClick={() => togglePick(option.id)}>
-          {rank(option.id) ? `Picked ${rank(option.id)}` : "Pick"}
-        </button>
-        <button className={armed ? "is-on" : undefined} onClick={startNote}>
-          Note
-        </button>
-        {pick.baseline ? (
-          <button
-            onPointerDown={() => setBaseline(true)}
-            onPointerUp={() => setBaseline(false)}
-            onPointerLeave={() => setBaseline(false)}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            Before
-          </button>
-        ) : null}
-        <button className="pick-actions-submit" onClick={() => void submit()}>
-          Submit
-        </button>
+        {view === "grid" ? (
+          <div className="pick-options" ref={gridRef}>
+            {options.map((item, at) => (
+              <section
+                key={item.id}
+                className={`pick-card${rank(item.id) ? " is-picked" : ""}${at === state.current && keyboard ? " is-focused" : ""}`}
+                onPointerDown={() => focus(at)}
+              >
+                <header>
+                  <h2>
+                    {item.id} · {item.label}
+                  </h2>
+                  <span className="pick-card-actions">
+                    {noteButton(item, at)}
+                    {pickButton(item)}
+                  </span>
+                </header>
+                {item.why ? <Markdown source={item.why} className="pick-why" /> : null}
+                {baseline && at === state.current && pick.baseline ? (
+                  <CardMedia
+                    session={session}
+                    base={props.base}
+                    media={[pick.baseline]}
+                    theme={theme}
+                    playing={playing}
+                    pins={() => []}
+                    armed={false}
+                    onPin={() => {}}
+                    onOpen={() => {}}
+                  />
+                ) : (
+                  <CardMedia
+                    session={session}
+                    base={props.base}
+                    media={item.media}
+                    theme={theme}
+                    playing={playing}
+                    pins={(media) => pinsFor(item, media)}
+                    armed={armed && at === state.current}
+                    onPin={(media, position) => pinAt(item, media, position)}
+                    onOpen={(media) => open(at, media)}
+                  />
+                )}
+                {item.body ? <Markdown source={item.body} className="pick-body" /> : null}
+                {notesList(item)}
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="pick-flip" {...swipe}>
+            {option.why ? <Markdown source={option.why} className="pick-why" /> : null}
+            <div className="pick-stage">
+              {(baseline && pick.baseline) || media ? (
+                <MediaView
+                  session={session}
+                  base={props.base}
+                  media={baseline && pick.baseline ? pick.baseline : media!}
+                  theme={theme}
+                  playback={playback}
+                  pins={baseline ? [] : pinsFor(option, index)}
+                  armed={armed}
+                  onPin={baseline ? undefined : (at, touched) => (armed || !touched ? pinAt(option, index, at) : undefined)}
+                />
+              ) : null}
+              {option.body && !media ? <Markdown source={option.body} className="pick-body" /> : null}
+            </div>
+            {option.media.length > 1 ? (
+              <span className="pick-dots" aria-label={`${index + 1} of ${option.media.length}`}>
+                {option.media.map((item, at) => (
+                  <button
+                    key={at}
+                    className={at === index ? "is-current" : undefined}
+                    title={item.label}
+                    onClick={() => setMediaIndex((prev) => ({ ...prev, [option.id]: at }))}
+                  />
+                ))}
+              </span>
+            ) : null}
+            {notesList(option)}
+          </div>
+        )}
       </div>
 
+      {message ? <div className="pick-toast">{message.text}</div> : null}
       {bar !== null ? (
-        <CommandBar prefix=":" value={bar} onChange={setBar} onSubmit={runCommand} onCancel={() => setBar(null)} />
+        <div className="pick-bar">
+          <CommandBar prefix=":" value={bar} onChange={setBar} onSubmit={runCommand} onCancel={() => setBar(null)} />
+        </div>
       ) : (
-        <footer className="status">
-          <span className="status-left">
-            <span className="hint">
-              <kbd>?</kbd> keys
-            </span>
-            {state.none ? <span className="muted">none of these</span> : null}
-            {theme === "dark" ? <span className="muted">dark</span> : null}
-            {message ? <span className="status-message">{message.text}</span> : null}
-          </span>
-          {pending ? <span className="status-pending">{pending}</span> : null}
-          <span className="status-right tabular">{state.picked.length ? `${state.picked.length} picked` : ""}</span>
-        </footer>
+        <form
+          className="pick-bar"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submit()
+          }}
+        >
+          {answer ? (
+            <p className="pick-done">{sent ? "Sent." : `Answered · ${answer.none ? "None" : answer.picked.join(", ") || "No pick"}`}</p>
+          ) : (
+            <>
+              <AutoGrow
+                inputRef={notesRef}
+                value={state.note}
+                placeholder={state.none ? "None of these" : "Notes"}
+                onChange={(note) => setState((prev) => ({ ...prev, note }))}
+              />
+              <button className="pick-send" type="submit" disabled={!canSend}>
+                Send
+              </button>
+            </>
+          )}
+        </form>
       )}
       {help ? <Help onClose={() => setHelp(false)} groups={["Pick"]} /> : null}
-      {prompt?.kind === "note" ? (
+      {prompt ? (
         <Prompt
           title={`Note · ${prompt.option}${prompt.at ? ("t" in prompt.at ? ` · ${formatTime(prompt.at.t)}` : " · pin") : ""}`}
           placeholder=""
@@ -436,20 +490,32 @@ export function PickDeck(props: {
             saveNote(prompt, value.trim())
           }}
         />
-      ) : prompt?.kind === "overall" ? (
-        <Prompt
-          title={state.none ? "None of these" : "Note"}
-          placeholder=""
-          initial={state.note}
-          multiline
-          onCancel={() => setPrompt(null)}
-          onSubmit={(value) => {
-            setPrompt(null)
-            setState((prev) => ({ ...prev, note: value.trim() }))
-          }}
-        />
       ) : null}
     </div>
+  )
+}
+
+/** The overall notes field: one line that grows with its text, up to a third of the screen. */
+function AutoGrow(props: {
+  inputRef: RefObject<HTMLTextAreaElement | null>
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  useLayoutEffect(() => {
+    const input = props.inputRef.current
+    if (!input) return
+    input.style.height = "auto"
+    input.style.height = `${input.scrollHeight}px`
+  }, [props.value, props.inputRef])
+  return (
+    <textarea
+      ref={props.inputRef}
+      rows={1}
+      value={props.value}
+      placeholder={props.placeholder}
+      onChange={(event) => props.onChange(event.target.value)}
+    />
   )
 }
 
@@ -471,24 +537,5 @@ function Previous(props: { previous: NonNullable<PickPayload["pick"]["previous"]
         ))}
       </ul>
     </details>
-  )
-}
-
-function Answered(props: { path: string; state: PickState; onHome: () => void }) {
-  return (
-    <div className="splash view-enter">
-      <div className="handed-back">
-        <svg className="handed-back-mark" width="40" height="40" viewBox="0 0 40 40" aria-hidden>
-          <circle cx="20" cy="20" r="19" />
-          <path d="M13 20.5l4.8 4.8L27.5 15" />
-        </svg>
-        <h1>Answered</h1>
-        <p className="tabular">{props.state.none ? "None of these" : props.state.picked.join(" · ") || "No pick"}</p>
-        <p className="handed-back-path">{props.path}</p>
-        <button className="link-button" onMouseDown={(event) => event.preventDefault()} onClick={props.onHome}>
-          Inbox
-        </button>
-      </div>
-    </div>
   )
 }

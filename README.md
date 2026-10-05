@@ -250,22 +250,22 @@ Generated from `web/keymap.ts`, which also drives key handling and the `?` overl
 | **Pick** | |
 | `h` / `ArrowLeft` | Previous option |
 | `l` / `ArrowRight` | Next option |
-| `1–9` | Option by number |
-| `j` / `ArrowDown` | Next media item of the option _(pick)_ |
-| `k` / `ArrowUp` | Previous media item of the option _(pick)_ |
-| `g` | Grid overview |
-| `Enter` / `o` | Open the option _(grid)_ |
-| `v` | Side by side with the next option _(pick)_ |
-| `t` | Light / dark |
-| `b` | Hold to show the baseline _(pick)_ |
+| `k` / `ArrowUp` | Option above _(grid)_ |
+| `j` / `ArrowDown` | Option below _(grid)_ |
+| `Enter` / `o` | Open the option full size _(grid)_ |
+| `1–9` | Open option by number |
+| `j` / `ArrowDown` | Next media item _(flip)_ |
+| `k` / `ArrowUp` | Previous media item _(flip)_ |
+| `g` / `Escape` | Back to the grid _(flip)_ |
+| `p` | Pick or unpick |
+| `t` | Dark / light stills |
+| `b` | Hold to show the baseline |
 | `Space` | Pause / play videos |
-| `p` / `Enter` | Pick or unpick; pick order is the ranking _(pick)_ |
-| `c` | Note on the option: click the image to pin it; on a video it stamps the time _(pick)_ |
-| `C` | Overall note |
+| `c` | Note on the option: click a still to pin it; on a video it stamps the time |
+| `C` | Notes for the whole pick |
 | `0` | None of these |
-| `:` | Command line (:w submit, :q close) |
-| `ZZ` | Submit |
-| `Escape` | Back to one option |
+| `:` | Command line (:w send, :q close) |
+| `ZZ` | Send |
 <!-- keys:end -->
 
 Sequences (`gg`, `]c`, `zz`) are typed in order; a bare `]` or `[` runs after about 400 ms. "(count)" bindings take a count, like `3j` or `2]`; `10G` goes to line 10 of the current file.

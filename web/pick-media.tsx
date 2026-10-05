@@ -146,17 +146,78 @@ function FrameView(props: { url: string; live: boolean; base: string }) {
   )
 }
 
-/** A grid card's preview: small, quiet, and never interactive. */
-export function Thumb(props: { session: string; media?: PickMedia; body?: string; theme: Theme }) {
-  const media = props.media
-  if (!media) return <div className="pick-thumb is-text">{props.body ? <Markdown source={props.body} /> : null}</div>
-  const src = sourceOf(media, props.theme)
-  const url = media.kind === "url" ? src : mediaUrl(props.session, src)
-  if (media.kind === "image") return <img className="pick-thumb" src={url} alt="" draggable={false} />
-  if (media.kind === "video") return <video className="pick-thumb" src={url} muted loop autoPlay playsInline />
-  if (media.kind === "page") return <iframe className="pick-thumb is-page" src={url} title={media.label} tabIndex={-1} />
-  if (media.kind === "url") return <div className="pick-thumb is-text">{new URL(url).host}</div>
-  return <div className="pick-thumb is-text">{media.label}</div>
+/**
+ * A card's media, as in the reference gallery: videos full width and always moving, stills two to a row, and
+ * pages, URLs, and text full width. Clicking a still pins it when a note is armed; otherwise it opens the option.
+ */
+export function CardMedia(props: {
+  session: string
+  base: string
+  media: PickMedia[]
+  theme: Theme
+  playing: boolean
+  pins: (index: number) => Pin[]
+  armed: boolean
+  onPin: (index: number, at: PickPosition) => void
+  onOpen: (index: number) => void
+}) {
+  const indexed = props.media.map((media, index) => ({ media, index }))
+  const stills = indexed.filter(({ media }) => media.kind === "image")
+  const url = (media: PickMedia) =>
+    media.kind === "url" ? sourceOf(media, props.theme) : mediaUrl(props.session, sourceOf(media, props.theme))
+  return (
+    <div className="pick-media-list">
+      {indexed
+        .filter(({ media }) => media.kind !== "image")
+        .map(({ media, index }) =>
+          media.kind === "video" ? (
+            <CardVideo key={index} url={url(media)} playing={props.playing} onOpen={() => props.onOpen(index)} />
+          ) : media.kind === "text" ? (
+            <div key={index} className="pick-card-text" onClick={() => props.onOpen(index)}>
+              <TextView url={url(media)} />
+            </div>
+          ) : (
+            <div key={index} className="pick-card-page">
+              <FrameView url={url(media)} live={media.kind === "url"} base={props.base} />
+            </div>
+          ),
+        )}
+      {stills.length ? (
+        <div className={`pick-stills${stills.length === 1 ? " is-single" : ""}`}>
+          {stills.map(({ media, index }) => (
+            <div key={index} className={`pick-still${props.armed ? " is-armed" : ""}`}>
+              <img
+                src={url(media)}
+                alt={media.label}
+                draggable={false}
+                onClick={(event) => {
+                  if (!props.armed) return props.onOpen(index)
+                  const box = event.currentTarget.getBoundingClientRect()
+                  props.onPin(index, { x: round((event.clientX - box.left) / box.width), y: round((event.clientY - box.top) / box.height) })
+                }}
+              />
+              {props.pins(index).map((pin) => (
+                <span key={pin.n} className="pick-pin" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }}>
+                  {pin.n}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function CardVideo(props: { url: string; playing: boolean; onOpen: () => void }) {
+  const ref = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const video = ref.current
+    if (!video) return
+    if (props.playing) void video.play().catch(() => undefined)
+    else video.pause()
+  }, [props.playing])
+  return <video ref={ref} className="pick-card-video" src={props.url} autoPlay muted loop playsInline onClick={props.onOpen} />
 }
 
 export function formatTime(seconds: number) {
@@ -165,5 +226,5 @@ export function formatTime(seconds: number) {
 }
 
 function round(value: number) {
-  return Math.round(value * 1000) / 1000
+  return Math.round(Math.min(1, Math.max(0, value)) * 1000) / 1000
 }
