@@ -33,6 +33,7 @@ export class World {
       XDG_DATA_HOME: join(dir, "data"),
       XDG_CACHE_HOME: join(dir, "cache"),
       DOCKET_REFRESH_MS: "1000",
+      DOCKET_TAILNET: "0",
       NO_COLOR: "1",
     }
   }
@@ -70,7 +71,7 @@ export class World {
   async open(url: string) {
     // Chromium resolves *.localhost itself; Playwright's bundled one does too.
     await this.page.goto(url)
-    await this.page.waitForSelector(".file, .home-head")
+    await this.page.waitForSelector(".file, .home-head, .pick")
   }
 
   async sessions(): Promise<{ id: string; status: string }[]> {
