@@ -100,7 +100,9 @@ async function waitForHandback(session: Session, registration: Registration) {
       process.exit(0)
     }
     await Bun.sleep(500)
-    if (event?.type === "missing") await register(port, { ...registration, refresh: false }).catch(() => undefined)
+    // Something other than docket on the port won't go away by retrying.
+    const running = await health(port).catch(fail)
+    if (event?.type === "missing" && running) await register(port, { ...registration, refresh: false }).catch(() => undefined)
     else await ensureServer(port).catch(() => undefined)
   }
 }
@@ -114,7 +116,12 @@ async function openInbox() {
 async function serverCommand(action: string | undefined) {
   if (action === "run") {
     const { serve } = await import("../src/server")
-    const started = await serve({ port, version: await buildVersion() })
+    const started = await serve({ port, version: await buildVersion() }).catch((error: { code?: string }) => {
+      // Another server won the port, maybe started by a client racing this one; it serves everyone.
+      if (error.code !== "EADDRINUSE") throw error
+      console.log(`docket server: port ${port} already has a server`)
+      process.exit(0)
+    })
     console.log(`docket server ${started.url} (pid ${process.pid})`)
     return
   }

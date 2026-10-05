@@ -17,10 +17,13 @@ export function logPath() {
   return join(dataHome(), ".server", "server.log")
 }
 
-/** The docket server on this port, `undefined` if nothing answers, or an error if something else does. */
+/**
+ * The docket server on this port, `undefined` if nothing answers (or a docket server is stopping), or an error if
+ * something else does.
+ */
 export async function health(port: number): Promise<Health | undefined> {
   const res = await fetch(`${serverBase(port)}/api/health`, { signal: AbortSignal.timeout(1500) }).catch(() => undefined)
-  if (!res) return undefined
+  if (!res || res.status === 503) return undefined
   const body = (await res.json().catch(() => undefined)) as Partial<Health> | undefined
   if (body?.app !== APP_ID) throw new Error(`port ${port} is in use by something other than docket (set DOCKET_PORT or --port)`)
   return body as Health
@@ -35,8 +38,7 @@ export async function ensureServer(port: number, options: { version?: string } =
   const running = await health(port)
   if (running && (!options.version || running.version === options.version)) return running
   if (running) await stopServer(port, "restart")
-  await spawnServer(port)
-  const started = await waitFor(port, (found) => found !== undefined, 20_000, "the docket server did not start; see " + logPath())
+  const started = await startServer(port)
   // Open tabs reload onto the new build; give them a moment to reconnect so they can be reused.
   if (running) await Bun.sleep(2500)
   return started
@@ -51,6 +53,28 @@ export async function stopServer(port: number, mode: "stop" | "restart") {
   return true
 }
 
+/**
+ * Spawns servers until one answers. Several clients may race to start one; the losers can't bind the port and
+ * exit, and a server still shutting down holds the port until it's gone, so a spawn that exits is retried.
+ */
+async function startServer(port: number) {
+  const deadline = Date.now() + 20_000
+  const spawned = { running: false }
+  while (Date.now() < deadline) {
+    const found = await health(port)
+    if (found) return found
+    if (!spawned.running) {
+      spawned.running = true
+      void (await spawnServer(port)).exited.then(() => {
+        spawned.running = false
+      })
+    }
+    await Bun.sleep(150)
+  }
+  throw new Error("the docket server did not start; see " + logPath())
+}
+
+/** Starts a detached server; `exited` resolves when that process exits. */
 async function spawnServer(port: number) {
   await mkdir(join(dataHome(), ".server"), { recursive: true })
   const log = await open(logPath(), "a")
@@ -58,6 +82,7 @@ async function spawnServer(port: number) {
   const child = spawn(process.execPath, args, { detached: true, stdio: ["ignore", log.fd, log.fd], cwd: ROOT, env: process.env })
   child.unref()
   await log.close()
+  return { exited: new Promise<void>((resolve) => child.once("exit", () => resolve())) }
 }
 
 async function waitFor(port: number, done: (found: Health | undefined) => boolean, timeout: number, message: string) {
@@ -70,8 +95,14 @@ async function waitFor(port: number, done: (found: Health | undefined) => boolea
   throw new Error(message)
 }
 
-export async function register(port: number, registration: Registration) {
+/** Registers the session. A server that is stopping answers 503; the session then goes to the next server. */
+export async function register(port: number, registration: Registration): Promise<{ id: string; url: string; focused: boolean }> {
   const res = await fetch(`${serverBase(port)}/api/sessions`, { method: "POST", body: JSON.stringify(registration) })
+  if (res.status === 503) {
+    await Bun.sleep(200)
+    await ensureServer(port)
+    return register(port, registration)
+  }
   if (!res.ok) throw new Error(`could not register the session: ${res.status} ${await res.text()}`)
   const body: { id: string; url: string; focused: boolean } = await res.json()
   return body

@@ -158,6 +158,8 @@ export type ServerEvent =
   | { type: "session"; id: string; version: number }
   | { type: "navigate"; id: string }
   | { type: "restart" }
+  /** The server was stopped on purpose; it won't come back on its own. */
+  | { type: "stopped" }
 
 /** A resolved review session: what `docket <args>` registers with the server. */
 export type Session = {

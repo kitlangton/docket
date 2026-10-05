@@ -26,7 +26,8 @@ const REFRESH_MS = Number(process.env.DOCKET_REFRESH_MS ?? 60_000)
 const IDLE_MS = Number(process.env.DOCKET_IDLE_MS ?? 30 * 60_000)
 
 type ServerOptions = { port: number; version: string }
-type ShutdownMode = "stop" | "restart"
+/** "stop" ends waiting clients; "restart" and "idle" let them reconnect. An idle shutdown cancels if anyone arrives. */
+type ShutdownMode = "stop" | "restart" | "idle"
 
 type Entry = {
   session: Session
@@ -61,13 +62,21 @@ export async function serve(options: ServerOptions) {
     DEV ? undefined : buildApp(),
   ])
 
-  const saveIndex = () => writeAtomic(indexPath, JSON.stringify(entries, null, 2))
+  // Saves run one after another, so an older snapshot never lands after a newer one.
+  const saving = { chain: Promise.resolve() }
+  const saveIndex = () => {
+    saving.chain = saving.chain.catch(() => undefined).then(() => writeAtomic(indexPath, JSON.stringify(entries, null, 2)))
+    return saving.chain
+  }
 
   const broadcast = (event: ServerEvent) => tabs.forEach((tab) => tab.send(event))
   const busy = () => tabs.size > 0 || waiters.size > 0
 
   const start = (id: string, ignoreCache: boolean) => {
-    const fresh = startRuntime(entries[id]!.session.manifest, ignoreCache, (version) => broadcast({ type: "session", id, version }))
+    // Versions continue from the replaced runtime, whose own late loads are ignored.
+    const fresh = startRuntime(entries[id]!.session.manifest, ignoreCache, runtimes.get(id)?.version ?? 0, (version) => {
+      if (runtimes.get(id) === fresh) broadcast({ type: "session", id, version })
+    })
     runtimes.set(id, fresh)
     return fresh
   }
@@ -98,24 +107,36 @@ export async function serve(options: ServerOptions) {
   }
 
   /**
-   * Stops the server. A restart (new code) leaves waiting clients to reconnect to the next server; a stop
-   * tells them the session closed, so they exit instead of starting another server.
+   * Stops the server. A restart (new code) or an idle exit leaves waiting clients to reconnect to the next
+   * server; a stop tells them the session closed, so they exit instead of starting another server. While
+   * stopping, health, register, and wait answer 503 so clients wait for the next server.
    */
-  const stopping = { started: false }
+  const stopping: { mode?: ShutdownMode } = {}
   const shutdown = async (mode: ShutdownMode) => {
-    if (stopping.started) return
-    stopping.started = true
+    if (stopping.mode) {
+      // An explicit stop wins over a restart or idle exit already under way.
+      if (mode === "stop") stopping.mode = "stop"
+      return
+    }
+    stopping.mode = mode
     broadcast({ type: "restart" })
     // Give tabs a moment to save pending state; stop() then waits for those requests to finish.
     await Bun.sleep(300)
+    if (stopping.mode === "idle" && busy()) {
+      stopping.mode = undefined
+      idle.since = Date.now()
+      return
+    }
     waiters.forEach((_, id) => {
-      if (mode === "stop") return notifyWaiters(id, { type: "closed", statePath: entries[id]!.session.statePath })
+      if (stopping.mode === "stop") return notifyWaiters(id, { type: "closed", statePath: entries[id]!.session.statePath })
       waiters.get(id)?.forEach((waiter) => waiter.close())
     })
+    if (stopping.mode === "stop") broadcast({ type: "stopped" })
     tabs.forEach((tab) => tab.close())
     await Promise.race([server.stop(), Bun.sleep(5000)])
     process.exit(0)
   }
+  const unavailable = () => Response.json({ error: "stopping" }, { status: 503 })
 
   const session = (req: Request & { params: { id: string } }) => {
     const id = req.params.id
@@ -129,11 +150,16 @@ export async function serve(options: ServerOptions) {
     port: options.port,
     hostname: "127.0.0.1",
     development: DEV,
+    // Without this, Bun lets a second server bind the same port and requests split between them.
+    reusePort: false,
     idleTimeout: 0,
     routes: {
       ...(app ?? { "/": index, "/s/:id": index }),
       "/api/health": {
-        GET: () => Response.json({ app: APP_ID, version: options.version, pid: process.pid, port: options.port, url: publicUrl }),
+        GET: () =>
+          stopping.mode
+            ? unavailable()
+            : Response.json({ app: APP_ID, version: options.version, pid: process.pid, port: options.port, url: publicUrl }),
       },
       "/api/shutdown": {
         POST: async (req) => {
@@ -145,6 +171,7 @@ export async function serve(options: ServerOptions) {
       "/api/sessions": {
         GET: async () => Response.json(await inbox()),
         POST: async (req) => {
+          if (stopping.mode) return unavailable()
           const registration: Registration = await req.json()
           const id = registration.session.id
           // A changed manifest (edited file, different flags) needs a fresh load, not the old runtime's items.
@@ -217,9 +244,23 @@ export async function serve(options: ServerOptions) {
         },
       },
       "/api/s/:id/wait": {
-        GET: (req) => {
+        GET: async (req) => {
+          if (stopping.mode) return unavailable()
           const found = session(req)
           if (!found) return notFound()
+          // Handed back while this client was away (say, reconnecting after a restart): deliver it now.
+          const { handedBackAt, session: s } = found.entry
+          const verdicts = handedBackAt
+            ? await Bun.file(s.outPath)
+                .json()
+                .catch(() => undefined)
+            : undefined
+          if (verdicts)
+            return eventStream((stream) => {
+              stream.send({ type: "handback", verdicts, outPath: s.outPath } satisfies WaitEvent)
+              queueMicrotask(stream.close)
+              return () => {}
+            })
           return eventStream((stream) => {
             const set = waiters.get(found.id) ?? new Set()
             set.add(stream)
@@ -315,7 +356,7 @@ export async function serve(options: ServerOptions) {
       if (busy()) idle.since = Date.now()
       if (Date.now() - idle.since <= IDLE_MS) return
       console.log(`docket: idle for ${Math.round(IDLE_MS / 1000)}s, shutting down`)
-      shutdown("stop")
+      shutdown("idle")
     },
     Math.min(30_000, Math.max(250, IDLE_MS / 4)),
   )
@@ -329,7 +370,7 @@ export async function serve(options: ServerOptions) {
   return { server, url: publicUrl }
 }
 
-function startRuntime(manifest: Manifest, ignoreCache: boolean, changed: (version: number) => void): Runtime {
+function startRuntime(manifest: Manifest, ignoreCache: boolean, version: number, changed: (version: number) => void): Runtime {
   const bump = () => changed(++runtime.version)
   const accept = (load: ItemLoad) => {
     const id = load.ok ? load.data.meta.id : load.id
@@ -353,7 +394,7 @@ function startRuntime(manifest: Manifest, ignoreCache: boolean, changed: (versio
   }
   const runtime: Runtime = {
     items: {},
-    version: 0,
+    version,
     refresh: (only) => {
       if (!reloading.busy) void load(only)
     },
@@ -365,6 +406,7 @@ function startRuntime(manifest: Manifest, ignoreCache: boolean, changed: (versio
       })
       bump()
     })
+    .catch((error) => console.error(`docket: reading the cache for ${manifest.title} failed: ${error}`))
     .then(() => load())
   return runtime
 }
