@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from
 import { join } from "node:path"
 import { devices } from "playwright"
 import type { PickAnswer } from "../src/types"
-import { World } from "./harness"
+import { run, World } from "./harness"
 import { makePick } from "./media"
 
 setDefaultTimeout(120_000)
+
+const BIN = join(import.meta.dir, "..", "bin", "docket.ts")
 
 let world: World
 beforeEach(async () => {
@@ -24,25 +26,28 @@ async function settle<T>(read: () => Promise<T>, expected: T, timeout = 15_000) 
   }
 }
 
-const current = () => world.page.locator(".pick-tab.is-current").first().innerText()
-const ranks = () =>
-  world.page.locator(".pick-tab").evaluateAll((tabs) => tabs.map((tab) => tab.querySelector(".pick-rank")?.textContent ?? ""))
+const cards = () => world.page.locator(".pick-card")
+const picked = () => world.page.locator(".pick-card.is-picked h2").allInnerTexts()
+const focused = async () => (await world.page.locator(".pick-card.is-focused h2").innerText()).split(" · ")[0]
 const answerOf = (dir: string): Promise<PickAnswer> => Bun.file(join(dir, "answer.json")).json()
+const docket = (...args: string[]) => run(["bun", BIN, ...args], world.repo, world.env)
 
 describe("pick", () => {
-  test("flip, grid, light/dark, ranking, a pinned note, a video note, submit", async () => {
+  test("grid, flip, the Dark/Light switch, single pick, pinned and video notes, Notes + Send", async () => {
     const dir = join(world.dir, "pick")
     const made = await makePick(dir)
     const { client, url } = await world.start("pick", made.manifest)
     await world.open(url)
-    await settle(current, "A")
+    await settle(() => cards().count(), made.video ? 4 : 3)
+    expect(await world.page.locator(".pick.is-grid").count()).toBe(1)
 
+    // Arrow keys move the focus ring; a number opens that option full size.
     await world.press("l")
-    await settle(current, "B")
-    await world.press("h")
-    await settle(current, "A")
+    await settle(focused, "B")
+    await world.press("ArrowRight")
+    await settle(focused, "C")
     await world.press("3")
-    await settle(current, "C")
+    await settle(() => world.page.locator(".pick-top h1").innerText(), "C · Prototype")
     expect(
       await world.page
         .frameLocator(".pick-page iframe")
@@ -50,37 +55,36 @@ describe("pick", () => {
         .evaluate((el) => getComputedStyle(el).color),
     ).toBe("rgb(200, 0, 0)")
     await world.press("2", "j")
-    await settle(() => world.page.locator(".pick-dots span").evaluateAll((dots) => dots.map((dot) => dot.className)), ["", "is-current"])
-
+    await settle(() => world.page.locator(".pick-dots button").evaluateAll((dots) => dots.map((dot) => dot.className)), ["", "is-current"])
     await world.press("g")
-    await settle(() => world.page.locator(".pick-card").count(), made.video ? 4 : 3)
-    await world.press("l", "Enter")
-    await settle(() => world.page.locator(".pick-grid").count(), 0)
-    await settle(current, "C")
+    await settle(() => world.page.locator(".pick.is-grid").count(), 1)
 
-    await world.press("1")
-    const src = () => world.page.locator(".pick-frame img").getAttribute("src")
-    const before = await src()
+    // One switch swaps every paired still.
+    const paired = () => world.page.locator(".pick-still img[src*='/a-']").evaluateAll((imgs) => imgs.map((img) => img.getAttribute("src")))
+    await world.page.locator(".seg button", { hasText: "Light" }).click()
+    await settle(async () => (await paired()).every((src) => src?.endsWith("a-light.png")), true)
+    await world.page.locator(".seg button", { hasText: "Dark" }).click()
+    await settle(async () => (await paired()).every((src) => src?.endsWith("a-dark.png")), true)
     await world.press("t")
-    await settle(async () => (await src()) !== before && /a-(light|dark)\.png$/.test((await src()) ?? ""), true)
+    await settle(async () => (await paired()).every((src) => src?.endsWith("a-light.png")), true)
 
-    // Holding b shows the baseline in place.
-    await world.page.keyboard.down("b")
-    await settle(() => world.page.locator(".pick-caption .pick-id").innerText(), "Before")
-    await world.page.keyboard.up("b")
-    await settle(() => world.page.locator(".pick-caption .pick-id").innerText(), "A")
+    // A pick on another card replaces the pick.
+    expect(await world.page.locator(".pick-send").isDisabled()).toBe(true)
+    await cards().nth(0).locator(".pick-button").click()
+    await settle(picked, ["A · Card"])
+    await cards().nth(1).locator(".pick-button").click()
+    await settle(picked, ["B · Inline"])
+    expect(await world.page.locator(".pick-send").isDisabled()).toBe(false)
 
-    await world.press("2", "p", "1", "p")
-    await settle(ranks, ["2", "1", "", ...(made.video ? [""] : [])])
-
-    // A pin: c arms it, a click on the image places it.
+    // c arms a pin on the focused card; a click on a still places it.
+    await world.press("1", "g")
     await world.press("c")
-    const box = (await world.page.locator(".pick-frame img").boundingBox())!
+    const box = (await cards().nth(0).locator(".pick-still img").boundingBox())!
     await world.page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.75)
     await world.page.waitForSelector(".prompt textarea")
     await world.page.keyboard.type("Too much padding here")
     await world.press("Enter")
-    await settle(() => world.page.locator(".pick-pin").count(), 1)
+    await settle(() => cards().nth(0).locator(".pick-pin").count(), 1)
 
     if (made.video) {
       await world.press("4")
@@ -90,20 +94,18 @@ describe("pick", () => {
       await world.page.keyboard.type("Jumps here")
       await world.press("Enter")
       await settle(() => world.page.locator(".pick-note-at").count(), 1)
+      await world.press("Escape")
     }
 
-    await world.press("Shift+C")
-    await world.page.keyboard.type("Card, but quieter")
-    await world.press("Enter")
-    await world.press("Shift+Z", "Shift+Z")
+    await world.page.locator(".pick-bar textarea").fill("Inline, but quieter")
+    await world.page.locator(".pick-send").click()
+    await settle(() => world.page.locator(".pick-done").innerText(), "Sent.")
     expect(await client.exited).toBe(0)
-    expect(client.output).toContain("docket: picked B, A")
+    expect(client.output).toContain("docket: picked B")
     expect(client.output).toContain(`answer: ${join(dir, "answer.json")}`)
 
     const answer = await answerOf(dir)
-    expect(answer.picked).toEqual(["B", "A"])
-    expect(answer.none).toBe(false)
-    expect(answer.note).toBe("Card, but quieter")
+    expect(answer).toMatchObject({ picked: ["B"], none: false, note: "Inline, but quieter" })
     const pin = answer.notes.find((note) => note.option === "A")!
     expect(pin.body).toBe("Too much padding here")
     if (!pin.at || !("x" in pin.at)) throw new Error("expected a pin")
@@ -116,8 +118,21 @@ describe("pick", () => {
 
     await world.open(world.base + "/")
     await world.page.waitForSelector(".inbox-row .inbox-kind")
-    expect(await world.page.locator(".inbox-answer").innerText()).toContain("B · A")
-    expect(await world.page.locator(".inbox-thumb").count()).toBe(1)
+    expect(await world.page.locator(".inbox-answer").innerText()).toContain("B")
+  })
+
+  test(`"pick": "many" ranks picks in order`, async () => {
+    const dir = join(world.dir, "pick")
+    const { client, url } = await world.start("pick", (await makePick(dir, { pick: "many" })).manifest)
+    await world.open(url)
+    await world.press("l", "p", "h", "p")
+    await settle(
+      () => world.page.locator(".pick-button").allInnerTexts(),
+      ["Pick 2", "Pick 1", "Pick", ...((await cards().count()) > 3 ? ["Pick"] : [])],
+    )
+    await world.press("Shift+Z", "Shift+Z")
+    expect(await client.exited).toBe(0)
+    expect((await answerOf(dir)).picked).toEqual(["B", "A"])
   })
 
   test("none of these, then :w", async () => {
@@ -125,20 +140,33 @@ describe("pick", () => {
     const { client, url } = await world.start("pick", (await makePick(dir)).manifest)
     await world.open(url)
     await world.press("p", "0")
-    await world.page.waitForSelector(".prompt textarea")
+    await settle(() => world.page.evaluate(() => document.activeElement?.tagName), "TEXTAREA")
     await world.page.keyboard.type("Neither reads well")
-    await world.press("Enter")
-    await settle(
-      ranks,
-      (await ranks()).map(() => ""),
-    )
+    await world.press("Escape")
+    await settle(picked, [])
     await world.press(":")
     await world.page.keyboard.type("w")
     await world.press("Enter")
     expect(await client.exited).toBe(0)
     expect(client.output).toContain("docket: none of these")
-    const answer = await answerOf(dir)
-    expect(answer).toMatchObject({ picked: [], none: true, note: "Neither reads well" })
+    expect(await answerOf(dir)).toMatchObject({ picked: [], none: true, note: "Neither reads well" })
+  })
+
+  test("docket answer from chat updates the open page and ends the waiting client", async () => {
+    const dir = join(world.dir, "pick")
+    const { client, url } = await world.start("pick", (await makePick(dir)).manifest)
+    await world.open(url)
+    const wrong = await docket("answer", url, "--pick", "Z").catch((error: Error) => error.message)
+    expect(wrong).toContain("unknown option Z")
+    const out = await docket("answer", url, "--pick", "c", "--note", "C, from chat")
+    expect(out).toContain("docket: picked C")
+    expect(out).toContain(`answer: ${join(dir, "answer.json")}`)
+    await settle(() => world.page.locator(".pick-done").innerText(), "Answered · C")
+    await settle(picked, ["C · Prototype"])
+    expect(await client.exited).toBe(0)
+    expect(client.output).toContain("docket: picked C")
+    expect(await answerOf(dir)).toMatchObject({ picked: ["C"], note: "C, from chat" })
+    expect((await world.sessions())[0]?.status).toBe("done")
   })
 
   test("Ctrl-C closes without an answer", async () => {
@@ -155,19 +183,27 @@ describe("pick", () => {
     await settle(async () => (await world.sessions()).find((row) => row.id === id)?.status, "progress")
   })
 
-  test("phone: label strip, swipe, pick, submit", async () => {
+  test("phone: stacked cards, the bar above the fold, Pick and Send by touch, swipe in flip view", async () => {
     const dir = join(world.dir, "pick")
     const { client, url } = await world.start("pick", (await makePick(dir)).manifest)
     const context = await world.browser.newContext({ ...devices["iPhone 13"] })
     const page = await context.newPage()
     page.on("pageerror", (error) => console.error("pageerror:", error.message))
     await page.goto(url)
-    await page.waitForSelector(".pick-strip")
-    expect(await page.locator(".pick-strip").isVisible()).toBe(true)
-    expect(await page.locator(".pick-actions").isVisible()).toBe(true)
-    const tab = () => page.locator(".pick-tab.is-current").first().innerText()
-    expect(await tab()).toBe("A")
+    await page.waitForSelector(".pick-card")
+    const viewport = page.viewportSize()!
+    const [first, second] = [await page.locator(".pick-card").nth(0).boundingBox(), await page.locator(".pick-card").nth(1).boundingBox()]
+    expect(second!.y).toBeGreaterThan(first!.y + first!.height - 1)
+    expect(second!.x).toBe(first!.x)
+    const bar = (await page.locator(".pick-bar").boundingBox())!
+    expect(bar.y + bar.height).toBeLessThanOrEqual(viewport.height + 1)
+    expect((await page.locator(".pick-send").boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    expect(await page.locator(".pick-bar").evaluate((el) => getComputedStyle(el).backdropFilter)).toContain("blur")
 
+    // Tapping a still opens the option; swipes move between options; back returns to the grid.
+    await page.locator(".pick-card").nth(0).locator(".pick-still img").first().tap()
+    await page.waitForSelector(".pick.is-flip")
+    const title = () => page.locator(".pick-top h1").innerText()
     const cdp = await context.newCDPSession(page)
     const swipe = async (from: number, to: number) => {
       const y = 400
@@ -177,15 +213,14 @@ describe("pick", () => {
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
     }
     await swipe(320, 60)
-    await settle(tab, "B")
-    await swipe(60, 320)
-    await settle(tab, "A")
-    await swipe(320, 60)
-    await settle(tab, "B")
+    await settle(title, "B · Inline")
+    await page.locator(".pick-back").tap()
+    await page.waitForSelector(".pick.is-grid")
 
-    await page.locator(".pick-actions button", { hasText: "Pick" }).tap()
-    await settle(() => page.locator(".pick-actions button").first().innerText(), "Picked 1")
-    await page.locator(".pick-actions-submit").tap()
+    await page.locator(".pick-card").nth(1).locator(".pick-button").tap()
+    await settle(() => page.locator(".pick-card.is-picked h2").allInnerTexts(), ["B · Inline"])
+    await page.locator(".pick-send").tap()
+    await settle(() => page.locator(".pick-done").innerText(), "Sent.")
     expect(await client.exited).toBe(0)
     expect((await answerOf(dir)).picked).toEqual(["B"])
     await context.close()

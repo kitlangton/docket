@@ -57,7 +57,7 @@ export async function video(path: string, color: string) {
  * A pick folder: three image options (light/dark pairs on A), a local prototype, a video option when ffmpeg is
  * available, and a baseline. Returns the manifest path.
  */
-export async function makePick(dir: string) {
+export async function makePick(dir: string, extra: Record<string, unknown> = {}) {
   await mkdir(join(dir, "proto"), { recursive: true })
   await Promise.all([
     Bun.write(join(dir, "a-light.png"), png(320, 200, [230, 236, 250])),
@@ -78,7 +78,7 @@ export async function makePick(dir: string) {
   const manifest = join(dir, "pick.json")
   await Bun.write(
     manifest,
-    JSON.stringify({ title: "Code block style", question: "Which **code block** style?", baseline: "current.png", options }),
+    JSON.stringify({ title: "Code block style", question: "Which **code block** style?", baseline: "current.png", options, ...extra }),
   )
   return { manifest, video: Boolean(clip) }
 }
