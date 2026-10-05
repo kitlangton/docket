@@ -370,7 +370,9 @@ export function PickDeck(props: {
               <section
                 key={item.id}
                 className={`pick-card${rank(item.id) ? " is-picked" : ""}${at === state.current && keyboard ? " is-focused" : ""}`}
-                onPointerDown={() => focus(at)}
+                onPointerDown={() => {
+                  if (at !== state.current) focus(at)
+                }}
               >
                 <header>
                   <h2>
