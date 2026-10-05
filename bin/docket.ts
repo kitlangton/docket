@@ -40,6 +40,8 @@ const args = parseArgs({
     open: { type: "boolean", default: true },
     refresh: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
+    // Accepted and ignored: servers spawned by older clients still pass it.
+    "idle-ms": { type: "string" },
   },
 })
 
