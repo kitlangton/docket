@@ -1,11 +1,24 @@
+import { rename } from "node:fs/promises"
 import { manifestItems } from "./load"
 import { itemId, sizeOf, type ItemLoad, type Manifest, type ReviewState, type VerdictsFile } from "./types"
 
-/** Reads review state; a session without a state file starts empty. */
+/** Reads review state. A session without a state file starts empty; an unreadable one is moved aside first. */
 export async function readState(path: string): Promise<ReviewState> {
+  const empty: ReviewState = { version: 2, current: null, reviews: {} }
   const file = Bun.file(path)
-  if (!(await file.exists())) return { version: 2, current: null, reviews: {} }
-  return file.json()
+  if (!(await file.exists())) return empty
+  return file.json().catch(async (error: unknown) => {
+    const aside = `${path}.unreadable-${Date.now()}`
+    // Two readers can race here; whichever renames first logs it.
+    if (
+      await rename(path, aside).then(
+        () => true,
+        () => false,
+      )
+    )
+      console.error(`docket: ${path} is unreadable (${error}); moved it to ${aside}`)
+    return empty
+  })
 }
 
 export function toVerdicts(sessionPath: string, manifest: Manifest, items: Record<string, ItemLoad>, state: ReviewState): VerdictsFile {
