@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
+import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { DEFAULT_PORT, ensureServer, health, logPath, parentName, register, stopServer, waitOnce } from "../src/client"
+import { answerSummary, resolvePick } from "../src/pick"
 import { resolveSession } from "../src/session"
-import type { Registration, Session, VerdictsFile } from "../src/types"
+import type { PickAnswer, PickSession, Registration, Session, VerdictsFile } from "../src/types"
 import { buildVersion } from "../src/version"
 
 const USAGE = `docket: review a queue of PRs in the browser, then hand back verdicts.
@@ -12,6 +14,7 @@ Usage:
   docket 123 456 …                   PR numbers
   docket --author @me [--label x] [--state open]
   docket <ref> | docket <base>..<head>   local branch or range
+  docket pick <manifest.json>        choose between options; writes answer.json
   docket open                        open the inbox
   docket server status|stop|restart  manage the background server
 
@@ -21,6 +24,7 @@ Options:
   --port <n>      Server port (default: $DOCKET_PORT or ${DEFAULT_PORT})
   --no-open       Don't open the browser
   --refresh       Ignore the PR cache
+  --timeout <d>   pick: stop waiting after this long (90s, 10m, 1h); the pick stays in the inbox
 
 Every session lives in one background server at http://docket.localhost:<port>, which starts on
 demand and stops after 30 idle minutes. docket waits until the session is handed back (w on the
@@ -39,6 +43,7 @@ const args = parseArgs({
     state: { type: "string" },
     open: { type: "boolean", default: true },
     refresh: { type: "boolean", default: false },
+    timeout: { type: "string" },
     help: { type: "boolean", short: "h", default: false },
     // Accepted and ignored: servers spawned by older clients still pass it.
     "idle-ms": { type: "string" },
@@ -54,6 +59,7 @@ if (args.values.help) {
 }
 if (command === "server") await serverCommand(subcommand)
 else if (command === "open" && args.positionals.length === 1) await openInbox()
+else if (command === "pick") await pick()
 else await review()
 
 async function review() {
@@ -62,11 +68,23 @@ async function review() {
     console.log(USAGE)
     process.exit(1)
   }
-  const [session, version, agent] = await Promise.all([
-    resolveSession({ ...args.values, positionals: args.positionals }).catch(fail),
-    buildVersion(),
-    parentName(),
-  ])
+  await runSession(resolveSession({ ...args.values, positionals: args.positionals }))
+}
+
+async function pick() {
+  const path = args.positionals[1]
+  if (!path || args.positionals.length > 2) {
+    console.log(USAGE)
+    process.exit(1)
+  }
+  const timeout = args.values.timeout === undefined ? undefined : parseDuration(args.values.timeout)
+  if (timeout === undefined && args.values.timeout !== undefined) fail(`--timeout: expected a duration like 90s, 10m, or 1h`)
+  await runSession(resolvePick(resolve(path), args.values.out), timeout)
+}
+
+/** Registers the session, prints its links, and blocks until it is handed back, closed, or times out. */
+async function runSession(resolving: Promise<Session>, timeout?: number) {
+  const [session, version, agent] = await Promise.all([resolving.catch(fail), buildVersion(), parentName()])
   await ensureServer(port, { version }).catch(fail)
   const registration = { session, cwd: process.cwd(), agent, refresh: args.values.refresh }
   const registered = await register(port, registration).catch(fail)
@@ -75,12 +93,28 @@ async function review() {
   if (args.values.open && !registered.focused) Bun.spawn(["open", registered.url], { stdout: "ignore", stderr: "ignore" })
 
   const close = () => {
-    console.log(`docket: closed without hand-back; progress saved in ${session.statePath}`)
+    console.log(closedMessage(session, session.statePath))
     process.exit(0)
   }
   process.on("SIGINT", close)
   process.on("SIGTERM", close)
+  if (timeout !== undefined)
+    setTimeout(() => {
+      console.log(`docket: timed out; the session stays open in the inbox: ${registered.tailnetUrl ?? registered.url}`)
+      process.exit(0)
+    }, timeout)
   await waitForHandback(session, registration)
+}
+
+function closedMessage(session: Session, statePath: string) {
+  return `docket: closed without ${session.kind === "pick" ? "answer" : "hand-back"}; progress saved in ${statePath}`
+}
+
+/** "90s", "10m", "1h", "500ms", or bare seconds. */
+function parseDuration(text: string) {
+  const match = text.trim().match(/^(\d+(?:\.\d+)?)(ms|s|m|h)?$/)
+  if (!match) return undefined
+  return Number(match[1]) * { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[(match[2] ?? "s") as "ms" | "s" | "m" | "h"]
 }
 
 /**
@@ -95,8 +129,13 @@ async function waitForHandback(session: Session, registration: Registration) {
       console.log(`verdicts: ${event.outPath}`)
       process.exit(0)
     }
+    if (event?.type === "answer" && session.kind === "pick") {
+      console.log(summarizeAnswer(event.answer, session))
+      console.log(`answer: ${event.outPath}`)
+      process.exit(0)
+    }
     if (event?.type === "closed") {
-      console.log(`docket: closed without hand-back; progress saved in ${event.statePath}`)
+      console.log(closedMessage(session, event.statePath))
       process.exit(0)
     }
     await Bun.sleep(500)
@@ -155,6 +194,21 @@ async function serverCommand(action: string | undefined) {
 function fail(error: unknown): never {
   console.error(`docket: ${error instanceof Error ? error.message : error}`)
   process.exit(1)
+}
+
+function summarizeAnswer(answer: PickAnswer, session: PickSession) {
+  const label = (id: string) => session.pick.options.find((option) => option.id === id)?.label ?? id
+  const picked = answer.picked.map((id, rank) => `  ${rank + 1}. ${id} ${label(id)}`)
+  const notes = answer.notes.map((note) => {
+    const at = !note.at
+      ? ""
+      : "t" in note.at
+        ? ` @${note.at.t.toFixed(1)}s`
+        : ` @${Math.round(note.at.x * 100)}%,${Math.round(note.at.y * 100)}%`
+    return `  note ${note.option}${at}: ${note.body.split("\n")[0]}`
+  })
+  const overall = answer.note ? [`  note: ${answer.note.split("\n")[0]}`] : []
+  return [`docket: ${answerSummary(answer)}`, ...picked, ...overall, ...notes].join("\n")
 }
 
 function summarize(verdicts: VerdictsFile) {

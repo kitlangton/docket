@@ -139,6 +139,7 @@ export type SessionStatus = "waiting" | "progress" | "done"
 /** One row of the home inbox. */
 export type InboxEntry = {
   id: string
+  kind: SessionKind
   title: string
   repo: string
   cwd?: string
@@ -149,6 +150,8 @@ export type InboxEntry = {
   notes: number
   counts: { approve: number; reject: number; skip: number; unreviewed: number }
   updatedAt: string
+  /** Pick sessions: the answer so far, and a thumbnail of the first pick. */
+  pick?: { picked: string[]; none: boolean; thumb?: string }
 }
 
 /** Server events on /api/events, shared by tabs. */
@@ -161,8 +164,14 @@ export type ServerEvent =
   /** The server was stopped on purpose; it won't come back on its own. */
   | { type: "stopped" }
 
-/** A resolved review session: what `docket <args>` registers with the server. */
-export type Session = {
+export type SessionKind = "review" | "pick"
+
+/** A resolved session: what `docket <args>` or `docket pick` registers with the server. */
+export type Session = ReviewSession | PickSession
+
+export type ReviewSession = {
+  /** Absent in sessions registered before picks existed. */
+  kind?: "review"
   /** Stable id: registering the same session again attaches to it. */
   id: string
   manifest: Manifest
@@ -172,6 +181,55 @@ export type Session = {
   outPath: string
 }
 
+export type PickSession = {
+  kind: "pick"
+  id: string
+  pick: PickManifest
+  manifestPath: string
+  statePath: string
+  /** Where answer.json goes. */
+  outPath: string
+}
+
+export type MediaKind = "image" | "video" | "url" | "page" | "text"
+
+/** One thing to look at. `src` is a path relative to the manifest's folder, or a URL for `url`. */
+export type PickMedia = { kind: MediaKind; src: string; dark?: string; label: string }
+
+export type PickOption = { id: string; label: string; why?: string; body?: string; media: PickMedia[] }
+
+/** A pick manifest after validation: ids, labels, and media kinds filled in. */
+export type PickManifest = {
+  title: string
+  question?: string
+  baseline?: PickMedia
+  options: PickOption[]
+  previous?: PickAnswer
+}
+
+export type PickPosition = { x: number; y: number } | { t: number }
+
+export type PickNote = { id: string; option: string; body: string; media: number; at?: PickPosition }
+
+export type PickState = { version: 1; current: number; picked: string[]; none: boolean; note: string; notes: PickNote[] }
+
+/** answer.json: what the agent reads back. `picked` is in rank order. */
+export type PickAnswer = {
+  session: string
+  answeredAt: string
+  picked: string[]
+  none: boolean
+  note: string
+  notes: Omit<PickNote, "id">[]
+}
+
+/** Where the server serves a pick session's file (`src` relative to the manifest's folder). */
+export function mediaUrl(session: string, src: string) {
+  return `/api/s/${encodeURIComponent(session)}/media/${src.split("/").map(encodeURIComponent).join("/")}`
+}
+
+export type PickPayload = { id: string; kind: "pick"; pick: PickManifest; outPath: string }
+
 /** Identifies a docket server at /api/health, so an unrelated process on the port isn't mistaken for one. */
 export const APP_ID = "docket"
 
@@ -180,4 +238,7 @@ export type Registration = { session: Session; cwd?: string; agent?: string; ref
 
 /** Events a waiting client receives on /api/s/:id/wait. */
 export type WaitEvent =
-  { type: "hello"; version: string } | { type: "handback"; verdicts: VerdictsFile; outPath: string } | { type: "closed"; statePath: string }
+  | { type: "hello"; version: string }
+  | { type: "handback"; verdicts: VerdictsFile; outPath: string }
+  | { type: "answer"; answer: PickAnswer; outPath: string }
+  | { type: "closed"; statePath: string }

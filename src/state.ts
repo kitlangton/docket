@@ -2,9 +2,10 @@ import { rename } from "node:fs/promises"
 import { manifestItems } from "./load"
 import { itemId, sizeOf, type ItemLoad, type Manifest, type ReviewState, type VerdictsFile } from "./types"
 
-/** Reads review state. A session without a state file starts empty; an unreadable one is moved aside first. */
-export async function readState(path: string): Promise<ReviewState> {
-  const empty: ReviewState = { version: 2, current: null, reviews: {} }
+const EMPTY_REVIEW_STATE: ReviewState = { version: 2, current: null, reviews: {} }
+
+/** Reads session state. A session without a state file starts empty; an unreadable one is moved aside first. */
+export async function readState<T = ReviewState>(path: string, empty: T = EMPTY_REVIEW_STATE as T): Promise<T> {
   const file = Bun.file(path)
   if (!(await file.exists())) return empty
   return file.json().catch(async (error: unknown) => {

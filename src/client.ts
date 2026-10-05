@@ -96,7 +96,10 @@ async function waitFor(port: number, done: (found: Health | undefined) => boolea
 }
 
 /** Registers the session. A server that is stopping answers 503; the session then goes to the next server. */
-export async function register(port: number, registration: Registration): Promise<{ id: string; url: string; focused: boolean }> {
+export async function register(
+  port: number,
+  registration: Registration,
+): Promise<{ id: string; url: string; tailnetUrl?: string; focused: boolean }> {
   const res = await fetch(`${serverBase(port)}/api/sessions`, { method: "POST", body: JSON.stringify(registration) })
   if (res.status === 503) {
     await Bun.sleep(200)
@@ -104,7 +107,7 @@ export async function register(port: number, registration: Registration): Promis
     return register(port, registration)
   }
   if (!res.ok) throw new Error(`could not register the session: ${res.status} ${await res.text()}`)
-  const body: { id: string; url: string; focused: boolean } = await res.json()
+  const body: { id: string; url: string; tailnetUrl?: string; focused: boolean } = await res.json()
   return body
 }
 
