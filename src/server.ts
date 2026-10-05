@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path"
 import index from "../web/index.html"
 import { fileAt, interdiff, loadAll, manifestItems, readCache } from "./load"
 import { writeAtomic } from "./files"
+import { tailnetUrl } from "./tailnet"
 import { EMPTY_PICK_STATE, mediaPath, mediaResponse, toAnswer } from "./pick"
 import { dataHome } from "./session"
 import { readState, toVerdicts } from "./state"
@@ -68,6 +69,8 @@ export async function serve(options: ServerOptions) {
   const waiters = new Map<string, Set<Stream>>()
   const tabs = new Map<string, Stream & { at: string }>()
   const idle = { since: Date.now() }
+  // Set once the server is bound; registrations wait for it so their first link can include the tailnet one.
+  const tailnet: { ready: Promise<string | undefined> } = { ready: Promise.resolve(undefined) }
   const [publicUrl, app] = await Promise.all([
     portlessAlias(options.port).then((alias) => alias ?? `http://docket.localhost:${options.port}`),
     DEV ? undefined : buildApp(),
@@ -210,7 +213,7 @@ export async function serve(options: ServerOptions) {
             [...tabs.values()].find((candidate) => candidate.at === "/")
           if (tab) tab.send({ type: "navigate", id } satisfies ServerEvent)
           const path = `/s/${encodeURIComponent(id)}`
-          return Response.json({ id, url: publicUrl + path, focused: Boolean(tab) })
+          return Response.json({ id, url: publicUrl + path, tailnetUrl: (await tailnet.ready)?.concat(path), focused: Boolean(tab) })
         },
       },
       "/api/events": {
@@ -420,6 +423,11 @@ export async function serve(options: ServerOptions) {
     const open = new Set([...tabs.values()].flatMap((tab) => tab.at.match(/^\/s\/([^/]+)/)?.slice(1) ?? []).map(decodeURIComponent))
     open.forEach((id) => runtimes.get(id)?.refresh())
   }, REFRESH_MS)
+  // After binding, so a spawner that lost the port race never touches the tailnet.
+  tailnet.ready = tailnetUrl(options.port).catch((error) => {
+    console.error(`docket: tailnet setup failed: ${error}`)
+    return undefined
+  })
   process.on("SIGTERM", () => shutdown("stop"))
   process.on("SIGINT", () => shutdown("stop"))
   return { server, url: publicUrl }

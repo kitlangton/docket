@@ -89,6 +89,7 @@ async function runSession(resolving: Promise<Session>, timeout?: number) {
   const registration = { session, cwd: process.cwd(), agent, refresh: args.values.refresh }
   const registered = await register(port, registration).catch(fail)
   console.log(`docket ${registered.url}`)
+  if (registered.tailnetUrl) console.log(`  tailnet ${registered.tailnetUrl}`)
   console.log(`  state ${session.statePath}`)
   if (args.values.open && !registered.focused) Bun.spawn(["open", registered.url], { stdout: "ignore", stderr: "ignore" })
 
