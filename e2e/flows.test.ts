@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { join } from "node:path"
 import type { VerdictsFile } from "../src/types"
-import { edit, World } from "./harness"
+import { edit, run, World } from "./harness"
 
 setDefaultTimeout(120_000)
 
@@ -184,6 +184,7 @@ describe("reviewing", () => {
     await command("2")
     await settle(title, "main..second")
     await command("set wrap")
+    await world.page.waitForSelector("diffs-container")
     expect(
       await world.page.evaluate(() =>
         document.querySelector("diffs-container")!.shadowRoot!.querySelector("[data-overflow]")?.getAttribute("data-overflow"),
@@ -201,7 +202,68 @@ describe("reviewing", () => {
   })
 })
 
+describe("risk fixes", () => {
+  test("]u lands on a rename-only file", async () => {
+    await run(["git", "checkout", "-qb", "moves", "main"], world.repo)
+    await edit(world.repo, "app.ts", { 30: "export const line30 = 30" })
+    await run(["git", "mv", "other.ts", "renamed.ts"], world.repo)
+    await run(["git", "-c", "user.name=docket", "-c", "user.email=docket@example.com", "commit", "-qam", "move other.ts"], world.repo)
+    const { url } = await world.start("main..moves")
+    await world.open(url)
+    await world.press("]", "u")
+    await settle(position, "app.ts:L30")
+    await world.press("]", "u")
+    await settle(position, "renamed.ts")
+    await world.press("x")
+    await settle(() => world.page.locator(".fh-tag.is-viewed").count(), 1)
+  })
+
+  test("undo restores the reviewed head", async () => {
+    const { id, url } = await world.start(await manifest())
+    await world.open(url)
+    const reviewedHead = async () => {
+      const state = await (await fetch(`http://127.0.0.1:${world.port}/api/s/${encodeURIComponent(id)}/state`)).json()
+      return state.reviews["ref:main..feature"]?.reviewedHead ?? null
+    }
+    await world.press("a")
+    await settle(title, "main..second")
+    await settle(async () => typeof (await reviewedHead()), "string")
+    await world.press("u")
+    await settle(title, "main..feature")
+    await settle(reviewedHead, null)
+  })
+})
+
 describe("one server", () => {
+  test("server stop ends a waiting client", async () => {
+    const { client } = await world.start("main..feature")
+    await run(["bun", join(import.meta.dir, "..", "bin", "docket.ts"), "server", "stop"], world.repo, world.env)
+    expect(await client.exited).toBe(0)
+    expect(client.output).toContain("closed without hand-back")
+  })
+
+  test("a restart keeps clients waiting without registering them again", async () => {
+    const { client, id } = await world.start("main..feature")
+    const index = join(world.env.XDG_DATA_HOME!, "docket", ".server", "sessions.json")
+    const registeredAt = async () => (await Bun.file(index).json())[id].registeredAt
+    const before = await registeredAt()
+    await run(["bun", join(import.meta.dir, "..", "bin", "docket.ts"), "server", "restart"], world.repo, world.env)
+    await settle(async () => (await world.sessions().catch(() => [])).find((row) => row.id === id)?.status, "waiting")
+    expect(await registeredAt()).toBe(before)
+    expect(client.proc.exitCode).toBeNull()
+  })
+
+  test("an unreadable state file doesn't break the inbox", async () => {
+    const broken = await world.start("main..feature")
+    const fine = await world.start("main..second")
+    const statePath = (await broken.client.waitFor(/state (\S+)/))[1]!
+    await Bun.write(statePath, "{ not json")
+    const res = await fetch(`http://127.0.0.1:${world.port}/api/sessions`)
+    expect(res.status).toBe(200)
+    const rows: { id: string }[] = await res.json()
+    expect(rows.map((row) => row.id)).toEqual([fine.id])
+  })
+
   test("inbox with two sessions; Ctrl-C leaves a session in progress; re-registering attaches", async () => {
     const first = await world.start("main..feature")
     const second = await world.start("main..second")
