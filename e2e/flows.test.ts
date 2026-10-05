@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import type { VerdictsFile } from "../src/types"
 import { edit, run, World } from "./harness"
 
@@ -28,6 +28,15 @@ async function manifest() {
     }),
   )
   return path
+}
+
+const api = () => `http://127.0.0.1:${world.port}/api`
+const docket = (...args: string[]) =>
+  run(["bun", join(import.meta.dir, "..", "bin", "docket.ts"), ...args, "--no-open"], world.repo, world.env)
+/** Running `docket server run` processes for this world's port. */
+const serverProcesses = async () => {
+  const out = await run(["pgrep", "-f", `server run --port ${world.port}`], world.dir).catch(() => "")
+  return out.split("\n").filter(Boolean).length
 }
 
 const position = async () => {
@@ -253,15 +262,73 @@ describe("one server", () => {
     expect(client.proc.exitCode).toBeNull()
   })
 
-  test("an unreadable state file doesn't break the inbox", async () => {
+  test("an unreadable state file is moved aside and the session opens empty", async () => {
     const broken = await world.start("main..feature")
     const fine = await world.start("main..second")
     const statePath = (await broken.client.waitFor(/state (\S+)/))[1]!
     await Bun.write(statePath, "{ not json")
-    const res = await fetch(`http://127.0.0.1:${world.port}/api/sessions`)
+    const res = await fetch(`${api()}/sessions`)
     expect(res.status).toBe(200)
     const rows: { id: string }[] = await res.json()
-    expect(rows.map((row) => row.id)).toEqual([fine.id])
+    expect(rows.map((row) => row.id).sort()).toEqual([broken.id, fine.id].sort())
+    const state = await (await fetch(`${api()}/s/${encodeURIComponent(broken.id)}/state`)).json()
+    expect(state.reviews).toEqual({})
+    const aside = await Array.fromAsync(new Bun.Glob(`${basename(statePath)}.unreadable-*`).scan(dirname(statePath)))
+    expect(aside.length).toBe(1)
+  })
+
+  test("one server per port: a second fails to bind, and clients converge after the server dies", async () => {
+    const clients = await Promise.all(["main..feature", "main..second", "feature"].map((ref) => world.start(ref)))
+    expect(await docket("server", "run")).toContain("already has a server")
+    const { pid } = await (await fetch(`${api()}/health`)).json()
+    process.kill(pid, "SIGKILL")
+    await settle(async () => (await world.sessions().catch(() => [])).filter((row) => row.status === "waiting").length, 3, 30_000)
+    await settle(serverProcesses, 1, 10_000)
+    clients.forEach(({ client }) => expect(client.proc.exitCode).toBeNull())
+  })
+
+  test("an idle shutdown doesn't close a client that arrives during it", async () => {
+    world.env.DOCKET_IDLE_MS = "1500"
+    for (const delay of [1300, 1550, 1800, 2050]) {
+      await docket("open")
+      await Bun.sleep(delay)
+      const { client } = await world.start("main..feature")
+      await Bun.sleep(2500)
+      expect(client.output).not.toContain("closed without hand-back")
+      expect(client.proc.exitCode).toBeNull()
+      await docket("server", "stop")
+      expect(await client.exited).toBe(0)
+    }
+  })
+
+  test("a hand-back while the client is away during a restart is still delivered", async () => {
+    const { client, id } = await world.start("main..feature")
+    client.proc.kill("SIGSTOP")
+    await docket("server", "restart")
+    const res = await fetch(`${api()}/s/${encodeURIComponent(id)}/handback`, {
+      method: "POST",
+      body: JSON.stringify({ version: 2, current: null, reviews: {} }),
+    })
+    expect(res.ok).toBe(true)
+    client.proc.kill("SIGCONT")
+    expect(await client.exited).toBe(0)
+    expect(client.output).toContain("handed back 1 item")
+  })
+
+  test("a foreign process on the port ends the waiting client instead of spinning", async () => {
+    const { client } = await world.start("main..feature")
+    client.proc.kill("SIGSTOP")
+    const { pid } = await (await fetch(`${api()}/health`)).json()
+    process.kill(pid, "SIGKILL")
+    await settle(serverProcesses, 0, 10_000)
+    const foreign = Bun.serve({ port: world.port, hostname: "127.0.0.1", reusePort: false, fetch: () => new Response("not docket") })
+    try {
+      client.proc.kill("SIGCONT")
+      expect(await client.exited).toBe(1)
+      expect(client.output).toContain("something other than docket")
+    } finally {
+      foreign.stop(true)
+    }
   })
 
   test("inbox with two sessions; Ctrl-C leaves a session in progress; re-registering attaches", async () => {
