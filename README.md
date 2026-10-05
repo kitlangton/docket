@@ -30,6 +30,7 @@ docket 123 456                   # GitHub PR numbers, in this order
 docket --author @me --state open # anything gh pr list can filter
 docket my-branch                 # a local branch against the base it forked from
 docket main..my-branch           # an explicit range
+docket pick pick.json            # choose between options (see Picks)
 docket open                      # the inbox
 docket server status|stop|restart
 ```
@@ -41,6 +42,7 @@ docket server status|stop|restart
 | `--port <n>`    | Server port (default: `$DOCKET_PORT` or 4789) |
 | `--no-open`     | Don't open a browser                          |
 | `--refresh`     | Ignore the PR cache                           |
+| `--timeout <d>` | `pick`: stop waiting after `90s`, `10m`, `1h` |
 
 Move with `j`/`k`, comment with `c` (or `V` then `c` on lines), decide with `a`/`r`/`s`, and hand back with `w` on the summary. `?` lists every key.
 
@@ -113,6 +115,61 @@ Move with `j`/`k`, comment with `c` (or `V` then `c` on lines), decide with `a`/
 ```
 
 Every item appears in manifest order, with `number` or `ref`. `verdict` is `approve`, `reject`, `skip`, or `null`. A note without `path` is about the whole PR. Line notes use GitHub's review-comment convention: `RIGHT` is the head's line numbers, `LEFT` the base's, and `startLine` appears only for ranges. `reviewedHead` differing from `currentHead` means commits landed after the verdict.
+
+## Picks
+
+`docket pick` shows a gallery of options (screenshots, light/dark pairs, videos, live pages, local prototypes, or text) and hands back which ones you chose, in rank order, with your notes. It uses the same server, inbox, and waiting contract as reviews.
+
+```sh
+docket pick round-2/pick.json            # prints the link, blocks until you submit
+docket pick pick.json --timeout 30m      # gives up waiting after 30 minutes; the pick stays in the inbox
+```
+
+On submit it prints a summary and `answer: <path>`, and exits 0. Closing without submitting (or Ctrl-C) exits 0 with `closed without answer`.
+
+### Pick manifest
+
+```json
+{
+  "title": "Code block style",
+  "question": "Which code block style?",
+  "baseline": { "light": "current-light.png", "dark": "current-dark.png" },
+  "options": [
+    { "id": "A", "label": "Card", "why": "Markdown.", "media": [{ "light": "card-l.png", "dark": "card-d.png" }, "card-scroll.mp4"] },
+    { "label": "Live", "media": ["https://example.com", "proto/", { "src": "ipad.png", "label": "iPad" }] },
+    { "label": "Leave it", "body": "Text options are Markdown." }
+  ],
+  "previous": "../round-1/answer.json"
+}
+```
+
+- Only `title` and `options` are required; each option needs `media` or a `body`. `id` defaults to A, B, C…, `label` to the first file or folder name.
+- Paths are relative to the manifest and must stay inside its folder; docket serves that folder and nothing else.
+- The kind comes from the extension: png, jpg, jpeg, webp, and gif are images; mp4, mov, and webm are videos; `.html` or a folder with `index.html` is a local prototype (its folder is served, so relative assets work); `.md` is text; `http(s)` URLs are live pages.
+- `{ "light": …, "dark": … }` makes a pair that `t` flips. `baseline` is what exists today; hold `b` to see it in place.
+- `previous` points at an earlier round's `answer.json`, shown collapsed at the top.
+
+### answer.json
+
+Written next to the manifest (or `--out`):
+
+```json
+{
+  "session": "/abs/path/pick.json",
+  "answeredAt": "2026-10-05T12:00:00.000Z",
+  "picked": ["B", "A"],
+  "none": false,
+  "note": "Overall note, Markdown.",
+  "notes": [
+    { "option": "B", "body": "Too much padding", "media": 0, "at": { "x": 0.42, "y": 0.18 } },
+    { "option": "A", "body": "Jumps here", "media": 1, "at": { "t": 3.2 } }
+  ]
+}
+```
+
+`picked` is in rank order. `media` is the index into the option's `media`. A pin's `x`/`y` are fractions of the image; `t` is seconds into a video. `none` means none of these; the reason is usually in `note`.
+
+Flip with `h`/`l` or `1`–`9`, `g` for the grid, `v` for side by side, `p` to pick, `c` to note (click to pin), `0` for none, `ZZ` or `:w` to submit. On a phone, swipe between options and use the buttons along the bottom. The full list is under **Pick** in [Keys](#keys).
 
 ## Keys
 
@@ -222,6 +279,7 @@ Sequences (`gg`, `]c`, `zz`) are typed in order; a bare `]` or `[` runs after ab
 - **Upgrades.** The server reports a version built from the package version and a hash of the source. A client running different code restarts it; open tabs save, reload, and reconnect.
 - **Idle.** The server exits after 30 minutes with no open tabs and no waiting clients (`DOCKET_IDLE_MS`).
 - **Data.** Session state and verdicts live next to a manifest, or in `~/.local/share/docket/<slug>/` for ad-hoc sessions. GitHub PR data is cached in `~/.cache/docket`. The server log is `~/.local/share/docket/.server/server.log`.
+- **Tailnet.** If `tailscale` is on `PATH`, the server adds a tailnet-only `tailscale serve` entry for its port (`tailscale serve --bg --https=<port> http://127.0.0.1:<port>`), so links work from your phone as `https://<machine>.<tailnet>.ts.net:<port>/s/<id>`. docket prints that link next to the local one. It never uses Funnel, only adds its own entry, and leaves it in place for the next start; remove it with `tailscale serve --https=<port> off`. Set `DOCKET_TAILNET=0` to skip this.
 - **portless.** If [`portless`](https://github.com/vercel-labs/portless) is on `PATH`, the server also registers `https://docket.localhost`.
 - **Diffs.** PRs are diffed against their merge base with local git (fetching `pull/N/head` once), falling back to `gh pr diff`. Expanding context reads full files with `git show`. Sessions open in a tab refresh every minute; PRs with new commits since your verdict are marked, and `i` shows only what changed.
 
